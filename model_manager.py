@@ -110,21 +110,9 @@ class Manager():
                     running_correct += (preds == target).sum().item()
                     running_total   += target.size(0)
                 
-
-                # forward + backward
-                # out   = self.model(signal)
-                # loss  = self.loss(out, target)
                 self.optim.zero_grad()
                 loss.backward()
                 self.optim.step()
-
-                # accumulate loss
-                # running_loss += loss.item()
-
-                # accumulate accuracy
-                # preds = out.argmax(dim=1)
-                # running_correct += (preds == target).sum().item()
-                # running_total   += target.size(0)
 
                 if i % 10 == 0:
                     print(f"Epoch [{epoch+1}/{self.num_epochs}], "
@@ -222,43 +210,6 @@ class Manager():
             gap_acc_plot_data,
             plotting=plotting
         )
-
-    # def run_testing(self, plotting=False):
-    #     self.load_model()
-    #     self.model.eval()
-
-    #     all_targets = []
-    #     all_preds   = []
-
-    #     with torch.no_grad():
-    #         for signal, target in self.test_data:
-    #             signal = signal.to(self.device).float()
-    #             target = target.to(self.device).long()
-                
-    #             outputs = self.model(signal)           # [batch, num_classes]
-    #             preds   = torch.argmax(outputs, dim=1) # [batch]
-                
-    #             all_targets.append(target.cpu())
-    #             all_preds.append(preds.cpu())
-
-
-    #     # Concatenate Batches
-    #     y_true = torch.cat(all_targets).numpy()
-    #     y_pred = torch.cat(all_preds).numpy()
-
-    #     # Compute Metrics
-    #     acc    = accuracy_score(y_true, y_pred)
-    #     report = classification_report(y_true, y_pred, digits=4)
-    #     cm     = confusion_matrix(y_true, y_pred)
-
-    #     # Display / Return
-    #     print(f"Test Accuracy: {acc:.4f}")
-    #     print("\nClassification Report:\n", report)
-    #     cm_filename = f'{self.file_pth}/confusion_matrix.png'
-    #     utils.confusion_plotter(cm, cm_filename, plotting)
-
-    #     with open(f'{self.file_pth}/test_reports.txt', 'w' , encoding="utf-8") as file:
-    #         file.write(report)  # type: ignore
 
     def run_testing(self, plotting=False):
         self.load_model()
