@@ -345,7 +345,7 @@ def confusion_plotter(cm, file_name, plotting=False, normalize='true'):
             if cm[i, j] != 0:
                 # text_color = 'white' if val > max_val / 2 else 'black'
                 text_color = 'black'
-                val = int(val)
+                # val = int(val)
                 ax.text(j, i, f'{val}', ha='center', va='center', color=text_color, fontsize=4)
 
     plt.tight_layout()

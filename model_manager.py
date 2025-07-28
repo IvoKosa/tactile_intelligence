@@ -281,10 +281,12 @@ class Manager():
             )
 
             # Save reports
-            with open(f'{self.file_pth}/test_reports_material.txt', 'w', encoding="utf-8") as f_mat, \
-                open(f'{self.file_pth}/test_reports_texture.txt',  'w', encoding="utf-8") as f_tex:
-                f_mat.write(mat_report)                                                             # type: ignore
-                f_tex.write(tex_report)                                                             # type: ignore
+            report_path = f'{self.file_pth}/test_report.txt'
+            with open(report_path, 'w', encoding='utf-8') as f:
+                f.write("=== Material Classification Report ===\n")
+                f.write(mat_report)                                                                 # type: ignore
+                f.write("\n\n=== Texture Classification Report ===\n")
+                f.write(tex_report)                                                                 # type: ignore
 
         else:
             y_true = torch.cat(all_targets).numpy()                                                 # type: ignore
@@ -430,23 +432,20 @@ class Manager():
 
 if __name__ == '__main__':
 
-    manager = Manager(file_pth='experiments/dual_loss/train1', 
+    manager = Manager(file_pth='experiments/hyperparams/normalise', 
                       num_epochs=15, batch_size=15,
                       distribution=[0.7, 0.2, 0.1],
                       filtering=False,
                       cropping=False,
-                      normalise=False,
+                      normalise=True,
                       augment=False)
     
-    # manager.run_training()
+    manager.run_training()
     manager.run_testing()
 
-    texture_list    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
-    material_list   = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50']
+    # texture_list    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
+    # material_list   = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50']
 
-    for i in material_list:
-        for j in texture_list:
-            print(f'{i} {j} = {utils.get_class(i, j)}')
-
-    # TODO
-    # Modify Manager class to accept dual parameter classification for tex and mat individually
+    # for i in material_list:
+    #     for j in texture_list:
+    #         print(f'{i} {j} = {utils.get_class(i, j)}')

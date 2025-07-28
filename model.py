@@ -8,6 +8,7 @@ class Tactile_CNN(nn.Module):
 
         self.dual_cls   = True
 
+        # Encoder
         self.conv0      = nn.Conv1d(num_features, 32, kernel_size=5, padding=2)
         self.bn0        = nn.BatchNorm1d(32)
         self.pool0      = nn.MaxPool1d(2)
@@ -20,6 +21,7 @@ class Tactile_CNN(nn.Module):
         self.bn2        = nn.BatchNorm1d(128)
         self.pool2      = nn.MaxPool1d(2)
 
+        # Classification Heads
         self.flatten        = nn.Flatten()
 
         self.mat_fc1        = nn.LazyLinear(256)
