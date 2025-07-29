@@ -114,7 +114,7 @@ class Manager():
                 loss.backward()
                 self.optim.step()
 
-                if i % 10 == 0:
+                if i % 20 == 0:
                     print(f"Epoch [{epoch+1}/{self.num_epochs}], "
                         f"Step [{i}/{len(self.train_data)}], "
                         f"Loss: {loss.item():.4f}")
@@ -432,19 +432,19 @@ class Manager():
 
 if __name__ == '__main__':
 
-    manager = Manager(file_pth='experiments/hyperparams/normalise', 
+    manager = Manager(file_pth='experiments/dual_cls/run2', 
                       num_epochs=15, batch_size=15,
                       distribution=[0.7, 0.2, 0.1],
                       filtering=False,
                       cropping=False,
-                      normalise=True,
+                      normalise=False,
                       augment=False)
     
     manager.run_training()
     manager.run_testing()
 
     # texture_list    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
-    # material_list   = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50']
+    # material_list   = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
 
     # for i in material_list:
     #     for j in texture_list:

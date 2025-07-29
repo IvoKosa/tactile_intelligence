@@ -1,0 +1,17 @@
+{
+    "num_epochs": 15,
+    "batch_size": 15,
+    "shuffle_batches": true,
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "test_train_split": [
+        0.7,
+        0.2,
+        0.1
+    ],
+    "filtering": false,
+    "cropping": false,
+    "normalise": false,
+    "augment": false,
+    "file_pth": "experiments/dual_cls/run1"
+}

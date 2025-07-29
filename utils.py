@@ -164,7 +164,7 @@ def dfs_to_tensor_nearest(df1: pd.DataFrame,
 def get_class(material, texture):
 
     texture_list    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
-    material_list   = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50']
+    material_list   = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
     material_index  = {s: i for i, s in enumerate(material_list)}
     texture_index   = {s: j for j, s in enumerate(texture_list)}
 
@@ -175,7 +175,7 @@ def get_class(material, texture):
 def get_class_dual(material, texture):
 
     texture_list    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
-    material_list   = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50']
+    material_list   = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
     material_index  = {s: i for i, s in enumerate(material_list)}
     texture_index   = {s: j for j, s in enumerate(texture_list)}
 
@@ -368,7 +368,7 @@ def confusion_plotter_dual(mat_cm, tex_cm,
         plotting (bool):     whether to plt.show() each
         normalize (str):     'true' (row‐wise), 'all', or anything else (counts)
     """
-    material_list = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50']
+    material_list = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
     texture_list  = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
 
     def _plot_cm(cm, classes, file_name):
