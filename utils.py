@@ -1,6 +1,7 @@
-import os, csv, torch, json
+import os, torch
 import numpy as np
 import pandas as pd
+from pathlib import Path
 import matplotlib.pyplot as plt
 from collections import defaultdict
 from scipy.signal import butter, filtfilt
@@ -165,6 +166,8 @@ def get_class(material, texture):
 
     texture_list    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
     material_list   = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
+    # texture_list, material_list = get_cls_lists('data')
+
     material_index  = {s: i for i, s in enumerate(material_list)}
     texture_index   = {s: j for j, s in enumerate(texture_list)}
 
@@ -176,10 +179,27 @@ def get_class_dual(material, texture):
 
     texture_list    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
     material_list   = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
+    # texture_list, material_list = get_cls_lists('data')
+
     material_index  = {s: i for i, s in enumerate(material_list)}
     texture_index   = {s: j for j, s in enumerate(texture_list)}
 
     return material_index[material], texture_index[texture]
+
+def get_cls_lists(root_dir):
+    root = Path(root_dir)
+    if not root.is_dir():
+        raise ValueError(f"Provided path '{root}' is not a directory.")
+    
+    texture = sorted([p.name for p in root.iterdir() if p.is_dir()])
+
+    if texture:
+        first_sub = root / texture[0]
+        material = sorted([p.name for p in first_sub.iterdir() if p.is_dir()])
+    else:
+        material = []
+
+    return texture, material
 
 # ------------------------------------------------------------------------ Filtering
 
@@ -357,11 +377,11 @@ def confusion_plotter_dual(mat_cm, tex_cm,
                            mat_file_name, tex_file_name,
                            plotting=False, normalize='true'):
     """
-    Plot and save two confusion‐matrix heatmaps: one for material (5×5),
+    Plot and save two confusion‐matrix heatmaps: one for material (6×6),
     one for texture (6×6).
 
     Args:
-        mat_cm (ndarray):    material confusion matrix (shape [5,5])
+        mat_cm (ndarray):    material confusion matrix (shape [6,6])
         tex_cm (ndarray):    texture confusion matrix (shape [6,6])
         mat_file_name (str): where to save the material plot
         tex_file_name (str): where to save the texture plot
@@ -370,6 +390,7 @@ def confusion_plotter_dual(mat_cm, tex_cm,
     """
     material_list = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
     texture_list  = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
+    # texture_list, material_list = get_cls_lists('data')
 
     def _plot_cm(cm, classes, file_name):
         # Normalize
@@ -431,9 +452,14 @@ def confusion_plotter_dual(mat_cm, tex_cm,
 
 if __name__ == '__main__':
 
-    pth         = 'data/ds20/bigberry/sensor0_data_20250722_161000.csv'
-    calibrated  = False
-    df          = data_loader(pth, cropping=False, filtering=False, calibrated=calibrated)
+    root_dir = 'data'
+    tex, mat = get_cls_lists(root_dir)
+    print(tex)
+    print(mat)
+
+    # pth         = 'data/ds20/bigberry/sensor0_data_20250722_161000.csv'
+    # calibrated  = False
+    # df          = data_loader(pth, cropping=False, filtering=False, calibrated=calibrated)
     # run_plotter()
     # confusion_plotter()
     # print(collect_files('data'))

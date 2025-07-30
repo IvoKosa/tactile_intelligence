@@ -32,6 +32,10 @@ class Tactile_CNN(nn.Module):
         self.tex_dropout    = nn.Dropout(0.3)
         self.tex_fc2        = nn.Linear(256, tex_classes)
 
+        # Confidence Head
+        self.mat_conf_fc    = nn.LazyLinear(1)
+        self.tex_conf_fc    = nn.LazyLinear(1)
+
     
     def forward(self, x):
         if x.dim() == 2:
@@ -40,9 +44,13 @@ class Tactile_CNN(nn.Module):
         x = self.pool1(F.relu(self.bn1(self.conv1(x))))
         x = self.pool2(F.relu(self.bn2(self.conv2(x))))
         x = self.flatten(x)
+        # Cls Heads
         mat_out = self.mat_fc2(self.mat_dropout(F.relu(self.mat_fc1(x))))
         tex_out = self.tex_fc2(self.tex_dropout(F.relu(self.tex_fc1(x))))
-        return mat_out, tex_out
+        # Confidence Heads
+        mat_conf = self.mat_conf_fc(x)
+        tex_conf = self.tex_conf_fc(x)
+        return mat_out, tex_out, mat_conf, tex_conf
 
 if __name__ =='__main__':
     input = torch.randn(1, 24, 400)

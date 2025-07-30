@@ -1,5 +1,5 @@
 # General Imports
-import signal_dataset, model, MLP_Model, utils, json, os, shutil
+import signal_dataset, model, utils, json, os, shutil
 import matplotlib.pyplot as plt
 
 # Pytorch Imports
@@ -31,7 +31,6 @@ class Manager():
         self.device                     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model                      = model.Tactile_CNN().to(self.device)
         self.dual_cls                   = self.model.dual_cls
-        # self.model                      = MLP_Model.SimpleMLP().to(self.device)
 
         # Old Dataset Functions
         # self.full_dataset               = signal_dataset.SignalDataset('data', filtering=filtering, cropping=cropping, normalise=normalise, augment=augment)
@@ -44,8 +43,8 @@ class Manager():
         val_set                         = signal_dataset.SignalDataset('data', self.dual_cls, 'val', distribution , filtering=filtering, cropping=cropping, normalise=normalise, augment=False)
         
         print(f'Train Dataset Length: {len(train_set)}')
-        print(f'Test Dataset Length: {len(test_set)}')
-        print(f'Val Dataset Length: {len(val_set)}')
+        print(f'Test Dataset Length:  {len(test_set)}')
+        print(f'Val Dataset Length:   {len(val_set)}')
 
         # Dataloader, Loss and Optimiser
         self.train_data                 = DataLoader(train_set, batch_size=self.batch_size, shuffle=shuffle)
