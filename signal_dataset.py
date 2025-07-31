@@ -2,7 +2,7 @@ import utils, torch
 from torch.utils.data import Dataset
 
 class SignalDataset(Dataset):
-    def __init__(self, root_dir, dual_cls, split='train', distribution=[0.7, 0.2, 0.1], filtering=False, cropping=False, normalise=False, augment=False):
+    def __init__(self, root_dir, dual_cls, split, distribution, filtering, cropping, normalise, augment):
         super().__init__()
         self.root_dir       = root_dir
         self.dual_cls       = dual_cls
@@ -11,7 +11,8 @@ class SignalDataset(Dataset):
         self.normalise      = normalise
         self.augment        = augment
         self.dirs_list      = utils.collect_files(root_dir, split, distribution)
-        # self.dirs_list      = utils.collect_files_old(root_dir)
+        self.mat_classes    = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
+        self.tex_classes    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
 
     def __len__(self):
         return len(self.dirs_list)

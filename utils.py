@@ -1,4 +1,4 @@
-import os, torch
+import os, re, torch
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -9,7 +9,7 @@ from scipy.signal import butter, filtfilt
 # ------------------------------------------------------------------------ Loading Functions
 
 # Load Data from Single CSV path
-def data_loader(csv_path, cropping=False, filtering=False, calibrated=True):
+def data_loader(csv_path, cropping, filtering, calibrated=True):
     df = pd.read_csv(csv_path, parse_dates=['timestamp'])
     df.set_index('timestamp', inplace=True)
     df = normalise_df_time(df)
@@ -77,7 +77,7 @@ def collect_files_old(root_dir, split_str='train', split_distribution=[0.7, 0.2,
 
     return entries
 
-def collect_files(root_dir, split_str='train', split_distribution=[0.7, 0.2, 0.1]):
+def collect_files(root_dir, split_str, split_distribution):
     """
     Crawl two levels deep under root_dir and collect all pairs of files
     (s0, s1) along with their sub1 and sub2 labels. Then stratify by
@@ -410,7 +410,7 @@ def confusion_plotter_dual(mat_cm, tex_cm,
         cmap.set_bad(color='white')
 
         fig, ax = plt.subplots(figsize=(8, 8))
-        cax = ax.matshow(cm_mask, cmap=cmap)
+        cax = ax.matshow(cm_mask, cmap=cmap, vmin=0, vmax=100)
         cbar = fig.colorbar(cax)
         cbar.ax.set_ylabel('Percentage', rotation=270, labelpad=15)
         cbar.ax.yaxis.set_major_formatter(lambda x, pos: f'{x:.0f}%')
@@ -436,7 +436,9 @@ def confusion_plotter_dual(mat_cm, tex_cm,
         for i in range(n):
             for j in range(n):
                 if cm[i, j] != 0:
-                    val = int(cm_pct[i, j])
+                    val = round(cm_pct[i, j], 1)
+                    if str(val)[-1] == '0':
+                        val = int(val)
                     ax.text(j, i, f'{val}', ha='center', va='center', color='black', fontsize=6)
 
         plt.tight_layout()
@@ -445,17 +447,155 @@ def confusion_plotter_dual(mat_cm, tex_cm,
         plt.savefig(file_name, dpi=300)
         plt.close(fig)
 
-        # Plot material (5 classes)
+    # Plot material (5 classes)
     _plot_cm(mat_cm, material_list, mat_file_name)
     # Plot texture (6 classes)
     _plot_cm(tex_cm,  texture_list,  tex_file_name)
 
+def loss_plots(save_pth,
+            train_loss,
+            val_loss,
+            train_acc,
+            val_acc,
+            gap_loss,
+            gap_acc,
+            plotting=False):
+    """
+    Plot training/validation loss and accuracy, plus generalisation gaps.
+
+    Args:
+        train_loss (list of float): per‑epoch training loss
+        val_loss   (list of float): per‑epoch validation loss
+        train_acc  (list of float): per‑epoch training accuracy
+        val_acc    (list of float): per‑epoch validation accuracy
+        gap_loss   (list of float): per‑epoch loss gap (val_loss - train_loss)
+        gap_acc    (list of float): per‑epoch accuracy gap (train_acc - val_acc)
+    """
+
+    # ——— Loss curves ———
+    plt.figure()
+    plt.plot(train_loss, label='Train Loss')
+    plt.plot(val_loss,   label='Val Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training vs Validation Loss')
+    plt.legend()
+    plt.grid(True)
+    if plotting:
+        plt.show()
+    plt.savefig(f'{save_pth}/loss_plot.png')
+
+    # ——— Accuracy curves ———
+    plt.figure()
+    plt.plot(train_acc, label='Train Acc')
+    plt.plot(val_acc,   label='Val Acc')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.title('Training vs Validation Accuracy')
+    plt.legend()
+    plt.grid(True)
+    if plotting:
+        plt.show()
+    plt.savefig(f'{save_pth}/accuracy_plot.png')
+
+    # ——— Generalisation gap ———
+    plt.figure()
+    plt.plot(gap_loss, label='Loss Gap (Val − Train)')
+    plt.plot(gap_acc,  label='Acc Gap  (Train − Val)')
+    plt.xlabel('Epoch')
+    plt.title('Generalisation Gap Over Time')
+    plt.legend()
+    plt.grid(True)
+    if plotting:
+        plt.show()
+    plt.savefig(f'{save_pth}/generalisation_plot.png')
+
+# ------------------------------------------------------------------------ New Dataset Management 
+
+def collect_file_info(root_dir, tex_classes, mat_classes):
+
+    # Should return a list of dicts in the following form
+    info_dict = {
+        's0_file_pth'   : 'data/...',
+        's1_file_pth'   : 'data/...',
+        'tex_cls_str'   : 'bigberry',
+        'tex_cls_int'   : '0',
+        'mat_cls_str'   : 'ef10',
+        'mat_cls_int'   : '1',
+        'multigrasp'    : True
+    }
+
+    dict_list = []
+    for dirpath, _, filenames in os.walk(root_dir):
+        for fname in filenames:
+            full_pth = os.path.join(dirpath, fname)
+            # print(dirpath)
+            # print(fname)
+            # return
+            if file_contains_str(full_pth, 'gripper_positions') or file_contains_str(full_pth, 'sensor1_data'):
+                continue
+            # searched_files.append(full_pth)
+
+            m = re.search(r"sensor(0)", full_pth)
+            s1_path = full_pth[:m.start(1)] + '1' + full_pth[m.start(1)+1:] # type: ignore
+
+            tex_cls, tex_idx = file_cls_finder(full_pth, tex_classes)
+            mat_cls, mat_idx = file_cls_finder(full_pth, mat_classes)
+            mult_bool        = file_contains_str(full_pth, 'multigrasp')
+            gripper_idx      = get_file_index(dirpath, fname)
+            gripper_pth      = rf'{dirpath}/gripper_positions_trial_{gripper_idx}.csv'
+
+            data_dict = {
+                's0_file_pth'   : full_pth,
+                's1_file_pth'   : s1_path,
+                'gripper_pos'   : gripper_pth,
+                'tex_cls_str'   : tex_cls,
+                'tex_cls_int'   : tex_idx,
+                'mat_cls_str'   : mat_cls,
+                'mat_cls_int'   : mat_idx,
+                'multigrasp'    : mult_bool
+            }
+            dict_list.append(data_dict)
+
+    return(dict_list)
+
+def file_contains_str(file_str, search_str):
+    return re.search(search_str, file_str, re.IGNORECASE) is not None
+
+def file_cls_finder(file_str, cls_list):
+    for cls in cls_list:
+        if cls in file_str:
+            sorted_cls = sorted(cls_list)
+            position = sorted_cls.index(cls)
+            return cls, position
+    raise ValueError("None of the candidate strings were found in the path.")
+
+def get_file_index(directory_path: str, filename: str) -> int:
+    if not os.path.isdir(directory_path):
+        raise FileNotFoundError(f"Directory not found: {directory_path!r}")
+    ignore_prefixes = ('gripper', 'sensor1')
+    files = []
+    for entry in os.listdir(directory_path):
+        if entry.startswith(ignore_prefixes):
+            continue
+        full_path = os.path.join(directory_path, entry)
+        if os.path.isfile(full_path):
+            files.append(entry)
+    files.sort()
+    try:
+        return files.index(filename) + 1
+    except ValueError:
+        raise ValueError(f"File {filename!r} not found in directory (after filtering).")
+
 if __name__ == '__main__':
 
     root_dir = 'data'
-    tex, mat = get_cls_lists(root_dir)
-    print(tex)
-    print(mat)
+    mat_classes    = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
+    tex_classes    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
+    collect_file_info(root_dir, mat_classes, tex_classes)
+    # tex, mat = get_cls_lists(root_dir)
+    # print(tex)
+    # print(mat)
 
     # pth         = 'data/ds20/bigberry/sensor0_data_20250722_161000.csv'
     # calibrated  = False
