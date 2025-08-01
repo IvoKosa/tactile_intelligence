@@ -1,5 +1,5 @@
 # General Imports
-import signal_dataset, model_1DCNN, Misc.lstm_model as lstm_model, utils, json, os, shutil
+import signal_dataset, model_1DCNN, utils, json, os, shutil
 import matplotlib.pyplot as plt
 
 # Pytorch Imports
@@ -11,8 +11,10 @@ from torch.utils.data import DataLoader, random_split
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 class Manager():
-    def __init__(self, file_pth='experiments/misc', num_epochs=20, batch_size=15, shuffle=True, lr=0.001, weight_decay=0.01,
-                 distribution=[0.7, 0.2, 0.1], filtering=False, cropping=False, normalise=False, augment=False):
+    def __init__(self, file_pth='experiments/misc', 
+                 num_epochs=20, batch_size=15, shuffle=True, lr=0.001, weight_decay=0.01, 
+                 distribution=[0.7, 0.2, 0.1], tex_weight=1.0, mat_weight=1.0, early_stopping=3,
+                 filtering=False, cropping=False, normalise=False, augment=False):
 
         # Hyperparams
         self.num_epochs                 = num_epochs
@@ -22,6 +24,9 @@ class Manager():
         self.weight_decay               = weight_decay
         self.file_pth                   = file_pth
         self.distribution               = distribution
+        self.tex_weight                 = tex_weight
+        self.mat_weight                 = mat_weight
+        self.early_stopping             = early_stopping if early_stopping is not None else num_epochs
         self.filtering                  = filtering
         self.cropping                   = cropping
         self.normalise                  = normalise
@@ -29,19 +34,14 @@ class Manager():
 
         # Dataset and Model
         self.device                     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model                      = lstm_model.Tactile_CNN().to(self.device)
+        self.model                      = model_1DCNN.Tactile_CNN().to(self.device)
         self.dual_cls                   = self.model.dual_cls
 
-        # Old Dataset Functions
-        # self.full_dataset               = signal_dataset.SignalDataset('data', filtering=filtering, cropping=cropping, normalise=normalise, augment=augment)
-        # gen_seed                        = torch.Generator().manual_seed(42)
-        # train_set, test_set, val_set    = random_split(self.full_dataset, [0.7, 0.2, 0.1], generator=gen_seed)
+        # Dataset Functions
+        full_set                        = signal_dataset.SignalDataset('data', self.dual_cls, multigrasp='Both', filtering=filtering, cropping=cropping, normalise=normalise, augment=augment)
+        # test_val                        = signal_dataset.SignalDataset('data', self.dual_cls, multigrasp='Only', filtering=filtering, cropping=cropping, normalise=normalise, augment=augment)
+        train_set, test_set, val_set    = torch.utils.data.random_split(full_set, [0.7, 0.2, 0.1])
 
-        # New Dataset Functions
-        train_set                       = signal_dataset.SignalDataset('data', self.dual_cls, 'train', distribution , filtering=filtering, cropping=cropping, normalise=normalise, augment=augment)
-        test_set                        = signal_dataset.SignalDataset('data', self.dual_cls, 'test', distribution , filtering=filtering, cropping=cropping, normalise=normalise, augment=False)
-        val_set                         = signal_dataset.SignalDataset('data', self.dual_cls, 'val', distribution , filtering=filtering, cropping=cropping, normalise=normalise, augment=False)
-        
         print(f'Train Dataset Length: {len(train_set)}')
         print(f'Test Dataset Length:  {len(test_set)}')
         print(f'Val Dataset Length:   {len(val_set)}')
@@ -146,7 +146,7 @@ class Manager():
                         mat_out, tex_out    = self.model(signal)
                         mat_loss            = self.mat_loss(mat_out, mat_target)
                         tex_loss            = self.tex_loss(tex_out, tex_target)
-                        loss                = mat_loss + tex_loss
+                        loss                = (self.mat_weight * mat_loss) + (self.tex_weight * tex_loss)
                         running_val_loss += loss.item()
                         mat_preds = mat_out.argmax(dim=1)
                         tex_preds = tex_out.argmax(dim=1)
@@ -194,7 +194,7 @@ class Manager():
             else:
                 epoch_no_improvement += 1
                 print(f'  → No improvement for {epoch_no_improvement} epoch(s).')
-                if epoch_no_improvement > 2:
+                if epoch_no_improvement > 3:
                     print('Early stopping activated.')
                     break
 
@@ -281,7 +281,6 @@ class Manager():
 
             # Save reports
             report_path = f'{self.file_pth}/test_report.txt'
-            print(report_path)
             with open(report_path, 'w', encoding='utf-8') as f:
                 f.write("=== Material Classification Report ===\n")
                 f.write(mat_report)                                                                 # type: ignore
@@ -355,6 +354,9 @@ class Manager():
             'learning_rate'     : self.learning_rate,
             'weight_decay'      : self.weight_decay,
             'test_train_split'  : self.distribution,
+            'tex_weight'        : self.tex_weight,
+            'mat_weight'        : self.mat_weight,
+            'early_stopping'    : self.early_stopping,
             'filtering'         : self.filtering,
             'cropping'          : self.cropping,
             'normalise'         : self.normalise,
@@ -368,15 +370,18 @@ class Manager():
         with open(f'{self.file_pth}/model_params.json', 'w') as json_file:
             json.dump(param_dict, json_file, indent=4)
 
-        source_path         = 'lstm_model.py'
+        source_path         = 'model_1DCNN.py'
         destination_path    = f'{self.file_pth}/model.py'
         shutil.copy2(source_path, destination_path)
 
 if __name__ == '__main__':
 
-    manager = Manager(file_pth='experiments/hyperparams/augment_filtering', 
-                      num_epochs=15, batch_size=15,
+    manager = Manager(file_pth='experiments/mult_grasp/run4', 
+                      num_epochs=25, batch_size=20, shuffle=True,
                       distribution=[0.7, 0.2, 0.1],
+                      tex_weight=1.0,
+                      mat_weight=1.05,
+                      early_stopping=5,
                       filtering=False,
                       cropping=False,
                       normalise=False,
@@ -384,10 +389,3 @@ if __name__ == '__main__':
     
     manager.run_training()
     manager.run_testing()
-
-    # texture_list    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
-    # material_list   = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
-
-    # for i in material_list:
-    #     for j in texture_list:
-    #         print(f'{i} {j} = {utils.get_class(i, j)}')

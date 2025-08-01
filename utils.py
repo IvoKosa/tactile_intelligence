@@ -1,16 +1,18 @@
-import os, re, torch
+import os, re, torch, random
 import numpy as np
 import pandas as pd
+from datetime import datetime, timedelta
 from pathlib import Path
 import matplotlib.pyplot as plt
 from collections import defaultdict
 from scipy.signal import butter, filtfilt
+from typing import List, Dict, Tuple
 
 # ------------------------------------------------------------------------ Loading Functions
 
 # Load Data from Single CSV path
 def data_loader(csv_path, cropping, filtering, calibrated=True):
-    df = pd.read_csv(csv_path, parse_dates=['timestamp'])
+    df = pd.read_csv(csv_path) 
     df.set_index('timestamp', inplace=True)
     df = normalise_df_time(df)
     if filtering:
@@ -47,6 +49,12 @@ def crop_df(df, center_pct, window_size):
     end   = min(center_idx + window_size, n)
     return df.iloc[start:end]
 
+def df_convert_unix_ts(csv_path, timestamp_col='timestamp_us'):
+    df = pd.read_csv(csv_path)
+    df[timestamp_col] = df[timestamp_col].apply(
+        lambda x: (datetime(1970, 1, 1) + timedelta(microseconds=int(x))).isoformat()
+    )
+    return df
 # ------------------------------------------------------------------------ Dataset Formating Functions
 
 def collect_files_old(root_dir, split_str='train', split_distribution=[0.7, 0.2, 0.1]):
@@ -514,27 +522,23 @@ def loss_plots(save_pth,
 
 def collect_file_info(root_dir, tex_classes, mat_classes):
 
-    # Should return a list of dicts in the following form
-    info_dict = {
-        's0_file_pth'   : 'data/...',
-        's1_file_pth'   : 'data/...',
-        'tex_cls_str'   : 'bigberry',
-        'tex_cls_int'   : '0',
-        'mat_cls_str'   : 'ef10',
-        'mat_cls_int'   : '1',
-        'multigrasp'    : True
-    }
+    # Should return a list of dicts in the following form:
+    # info_dict = {
+    #     's0_file_pth'   : 'data/...',
+    #     's1_file_pth'   : 'data/...',
+    #     'tex_cls_str'   : 'bigberry',
+    #     'tex_cls_int'   : '0',
+    #     'mat_cls_str'   : 'ef10',
+    #     'mat_cls_int'   : '1',
+    #     'multigrasp'    : True
+    # }
 
     dict_list = []
     for dirpath, _, filenames in os.walk(root_dir):
         for fname in filenames:
             full_pth = os.path.join(dirpath, fname)
-            # print(dirpath)
-            # print(fname)
-            # return
             if file_contains_str(full_pth, 'gripper_positions') or file_contains_str(full_pth, 'sensor1_data'):
                 continue
-            # searched_files.append(full_pth)
 
             m = re.search(r"sensor(0)", full_pth)
             s1_path = full_pth[:m.start(1)] + '1' + full_pth[m.start(1)+1:] # type: ignore
@@ -556,7 +560,9 @@ def collect_file_info(root_dir, tex_classes, mat_classes):
                 'multigrasp'    : mult_bool
             }
             dict_list.append(data_dict)
-
+    # sort_dict = [item for item in dict_list if item.get('multigrasp') is True]
+    # print(len(sort_dict))
+    # print([item for item in dict_list if item.get('multigrasp') is True])
     return(dict_list)
 
 def file_contains_str(file_str, search_str):
@@ -587,12 +593,60 @@ def get_file_index(directory_path: str, filename: str) -> int:
     except ValueError:
         raise ValueError(f"File {filename!r} not found in directory (after filtering).")
 
+def split_dataset(
+    dataset,
+    ratios,
+    split,
+    seed: int = 42
+    ):
+
+    if len(ratios) != 3 or abs(sum(ratios) - 1.0) > 1e-6:
+        raise ValueError("`ratios` must be [test, train, val] and sum to 1.")
+    if seed is not None:
+        random.seed(seed)
+
+    key = f"tex_cls_int"
+
+    groups: Dict[int, List[Dict]] = {}
+    for item in dataset:
+        label = item.get(key)
+        if label is None:
+            raise KeyError(f"Item missing expected key {key!r}: {item}")
+        groups.setdefault(label, []).append(item)
+
+    test_set, train_set, val_set = [], [], []
+
+    for items in groups.values():
+        random.shuffle(items)
+        n = len(items)
+        n_test  = int(n * ratios[0])
+        n_train = int(n * ratios[1])
+        n_val   = n - n_test - n_train
+
+        test_set.extend( items[:n_test] )
+        train_set.extend(items[n_test:n_test + n_train])
+        val_set.extend(  items[n_test + n_train:] )
+
+    random.shuffle(test_set)
+    random.shuffle(train_set)
+    random.shuffle(val_set)
+
+    if split == 'test':
+        return test_set
+    elif split == 'val':
+        return val_set
+    elif split == 'train':
+        return train_set
+    else:
+        raise ValueError('Split must be either: test/train/val')
+
 if __name__ == '__main__':
 
     root_dir = 'data'
     mat_classes    = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
     tex_classes    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
     collect_file_info(root_dir, mat_classes, tex_classes)
+
     # tex, mat = get_cls_lists(root_dir)
     # print(tex)
     # print(mat)
