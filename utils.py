@@ -1,4 +1,5 @@
 import os, re, torch, random
+from torch.utils.data import DataLoader
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
@@ -15,12 +16,15 @@ def data_loader(csv_path, cropping, filtering, calibrated=True):
     df = pd.read_csv(csv_path) 
     df.set_index('timestamp', inplace=True)
     df = normalise_df_time(df)
+
     if filtering:
         df = butterworth_filter(df)
+
     if cropping:
         df = crop_df(df, center_pct=50, window_size=200) # Cropped to the sensor contact 
     else:
-        df = crop_df(df, center_pct=50, window_size=425) # Cropped approx 50 datapoints off each end. Effectively full signal (win=700 for old data)
+        df = crop_df(df, center_pct=50, window_size=425) # Cropped approx 50 datapoints off each end. Effectively full signal
+    
     if calibrated:
         df = df.drop(columns=df.columns[0 : 12])
     else:
@@ -53,6 +57,119 @@ def df_convert_unix_ts(csv_path, timestamp_col='timestamp_us'):
     df = pd.read_csv(csv_path)
     df[timestamp_col] = df[timestamp_col].apply(
         lambda x: (datetime(1970, 1, 1) + timedelta(microseconds=int(x))).isoformat()
+    )
+    return df
+
+# ------------------------------------------------------------------------ New Dataset Management 
+
+def collect_file_info(root_dir, tex_classes, mat_classes):
+
+    dict_list = []
+    for dirpath, _, filenames in os.walk(root_dir):
+        for fname in filenames:
+            full_pth = os.path.join(dirpath, fname)
+            if file_contains_str(full_pth, 'gripper_positions') or file_contains_str(full_pth, 'sensor1_data'):
+                continue
+
+            m = re.search(r"sensor(0)", full_pth)
+            s1_path = full_pth[:m.start(1)] + '1' + full_pth[m.start(1)+1:] # type: ignore
+
+            tex_cls, tex_idx = file_cls_finder(full_pth, tex_classes)
+            mat_cls, mat_idx = file_cls_finder(full_pth, mat_classes)
+            mult_bool        = file_contains_str(full_pth, 'multigrasp')
+            gripper_idx      = get_file_index(dirpath, fname)
+            gripper_pth      = rf'{dirpath}/gripper_positions_trial_{gripper_idx}.csv'
+
+            if mult_bool:
+                pos = None
+                for char in ['1', '2', 'l', 'm', 'r']:
+                    if char == dirpath[-1]:
+                        pos = char
+                        break
+                if pos == None:
+                    raise KeyError('Grasp Pos Unknown')
+                if pos == '1' or pos == '2':
+                    pos = 'h' + pos
+                multi_grasp_pos     = pos
+            else:
+                multi_grasp_pos     = None
+
+            data_dict = {
+                's0_file_pth'   : full_pth,
+                's1_file_pth'   : s1_path,
+                'gripper_pos'   : gripper_pth,
+                'tex_cls_str'   : tex_cls,
+                'tex_cls_int'   : tex_idx,
+                'mat_cls_str'   : mat_cls,
+                'mat_cls_int'   : mat_idx,
+                'multigrasp'    : mult_bool,
+                'grasp_pos'     : multi_grasp_pos
+            }
+            dict_list.append(data_dict)
+    # sort_dict = [item for item in dict_list if item.get('multigrasp') is True]
+    # sort_dict = [item for item in dict_list if item.get('grasp_pos') == 'l']
+    # print(sort_dict)
+    return(dict_list)
+
+def file_contains_str(file_str, search_str):
+    return re.search(search_str, file_str, re.IGNORECASE) is not None
+
+def file_cls_finder(file_str, cls_list):
+    for cls in cls_list:
+        if cls in file_str:
+            sorted_cls = sorted(cls_list)
+            position = sorted_cls.index(cls)
+            return cls, position
+    raise ValueError("None of the candidate strings were found in the path.")
+
+def get_file_index(directory_path: str, filename: str) -> int:
+    if not os.path.isdir(directory_path):
+        raise FileNotFoundError(f"Directory not found: {directory_path!r}")
+    ignore_prefixes = ('gripper', 'sensor1')
+    files = []
+    for entry in os.listdir(directory_path):
+        if entry.startswith(ignore_prefixes):
+            continue
+        full_path = os.path.join(directory_path, entry)
+        if os.path.isfile(full_path):
+            files.append(entry)
+    files.sort()
+    try:
+        return files.index(filename) + 1
+    except ValueError:
+        raise ValueError(f"File {filename!r} not found in directory (after filtering).")
+    
+def compute_dataset_mean_std(dataset, batch_size=32, num_workers=4):
+    """Utility to scan the entire dataset and compute per-channel mean & std."""
+    loader = DataLoader(dataset, batch_size=batch_size,
+                        shuffle=False, num_workers=num_workers,
+                        pin_memory=True)
+
+    n_channels = None
+    s1 = 0.0  # sum of values
+    s2 = 0.0  # sum of squares
+    n  = 0    # count of total pixels/elements
+
+    for x, *_ in loader:
+        # x.shape = (B, C, ...)
+        B, C = x.shape[:2]
+        if n_channels is None:
+            n_channels = C
+        # flatten each sample: (B, C, N1*N2*...)
+        x_flat = x.view(B, C, -1)
+        s1 += x_flat.sum(dim=(0,2))         # shape (C,)
+        s2 += (x_flat ** 2).sum(dim=(0,2))  # shape (C,)
+        n  += B * x_flat.size(2)
+
+    mean = s1 / n
+    var  = (s2 / n) - mean**2
+    std  = torch.sqrt(var) # type: ignore
+    return mean, std
+
+def convert_gripper_time(gripper_pth):
+    df = pd.read_csv(gripper_pth)
+    df['timestamp_converted'] = df['timestamp_us'].apply(
+        lambda x: (datetime(2025, 1, 1) + timedelta(seconds=x)).isoformat()
     )
     return df
 # ------------------------------------------------------------------------ Dataset Formating Functions
@@ -414,7 +531,8 @@ def confusion_plotter_dual(mat_cm, tex_cm,
 
         # Mask zeros
         cm_mask = np.ma.masked_where(cm_pct == 0, cm_pct)
-        cmap = plt.cm.viridis.copy() # type: ignore                     
+        # cmap = plt.cm.viridis.copy() # type: ignore
+        cmap = plt.cm.Blues.copy() # type: ignore                    
         cmap.set_bad(color='white')
 
         fig, ax = plt.subplots(figsize=(8, 8))
@@ -447,7 +565,10 @@ def confusion_plotter_dual(mat_cm, tex_cm,
                     val = round(cm_pct[i, j], 1)
                     if str(val)[-1] == '0':
                         val = int(val)
-                    ax.text(j, i, f'{val}', ha='center', va='center', color='black', fontsize=6)
+                    if val <= 50:
+                        ax.text(j, i, f'{val}', ha='center', va='center', color='black', fontsize=10)
+                    else:
+                        ax.text(j, i, f'{val}', ha='center', va='center', color='white', fontsize=10)
 
         plt.tight_layout()
         if plotting:
@@ -518,81 +639,6 @@ def loss_plots(save_pth,
         plt.show()
     plt.savefig(f'{save_pth}/generalisation_plot.png')
 
-# ------------------------------------------------------------------------ New Dataset Management 
-
-def collect_file_info(root_dir, tex_classes, mat_classes):
-
-    # Should return a list of dicts in the following form:
-    # info_dict = {
-    #     's0_file_pth'   : 'data/...',
-    #     's1_file_pth'   : 'data/...',
-    #     'tex_cls_str'   : 'bigberry',
-    #     'tex_cls_int'   : '0',
-    #     'mat_cls_str'   : 'ef10',
-    #     'mat_cls_int'   : '1',
-    #     'multigrasp'    : True
-    # }
-
-    dict_list = []
-    for dirpath, _, filenames in os.walk(root_dir):
-        for fname in filenames:
-            full_pth = os.path.join(dirpath, fname)
-            if file_contains_str(full_pth, 'gripper_positions') or file_contains_str(full_pth, 'sensor1_data'):
-                continue
-
-            m = re.search(r"sensor(0)", full_pth)
-            s1_path = full_pth[:m.start(1)] + '1' + full_pth[m.start(1)+1:] # type: ignore
-
-            tex_cls, tex_idx = file_cls_finder(full_pth, tex_classes)
-            mat_cls, mat_idx = file_cls_finder(full_pth, mat_classes)
-            mult_bool        = file_contains_str(full_pth, 'multigrasp')
-            gripper_idx      = get_file_index(dirpath, fname)
-            gripper_pth      = rf'{dirpath}/gripper_positions_trial_{gripper_idx}.csv'
-
-            data_dict = {
-                's0_file_pth'   : full_pth,
-                's1_file_pth'   : s1_path,
-                'gripper_pos'   : gripper_pth,
-                'tex_cls_str'   : tex_cls,
-                'tex_cls_int'   : tex_idx,
-                'mat_cls_str'   : mat_cls,
-                'mat_cls_int'   : mat_idx,
-                'multigrasp'    : mult_bool
-            }
-            dict_list.append(data_dict)
-    # sort_dict = [item for item in dict_list if item.get('multigrasp') is True]
-    # print(len(sort_dict))
-    # print([item for item in dict_list if item.get('multigrasp') is True])
-    return(dict_list)
-
-def file_contains_str(file_str, search_str):
-    return re.search(search_str, file_str, re.IGNORECASE) is not None
-
-def file_cls_finder(file_str, cls_list):
-    for cls in cls_list:
-        if cls in file_str:
-            sorted_cls = sorted(cls_list)
-            position = sorted_cls.index(cls)
-            return cls, position
-    raise ValueError("None of the candidate strings were found in the path.")
-
-def get_file_index(directory_path: str, filename: str) -> int:
-    if not os.path.isdir(directory_path):
-        raise FileNotFoundError(f"Directory not found: {directory_path!r}")
-    ignore_prefixes = ('gripper', 'sensor1')
-    files = []
-    for entry in os.listdir(directory_path):
-        if entry.startswith(ignore_prefixes):
-            continue
-        full_path = os.path.join(directory_path, entry)
-        if os.path.isfile(full_path):
-            files.append(entry)
-    files.sort()
-    try:
-        return files.index(filename) + 1
-    except ValueError:
-        raise ValueError(f"File {filename!r} not found in directory (after filtering).")
-
 def split_dataset(
     dataset,
     ratios,
@@ -642,18 +688,9 @@ def split_dataset(
 
 if __name__ == '__main__':
 
-    root_dir = 'data'
-    mat_classes    = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
-    tex_classes    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
-    collect_file_info(root_dir, mat_classes, tex_classes)
+    # root_dir = 'data'
+    # mat_classes    = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
+    # tex_classes    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
+    # collect_file_info(root_dir, mat_classes, tex_classes)
 
-    # tex, mat = get_cls_lists(root_dir)
-    # print(tex)
-    # print(mat)
-
-    # pth         = 'data/ds20/bigberry/sensor0_data_20250722_161000.csv'
-    # calibrated  = False
-    # df          = data_loader(pth, cropping=False, filtering=False, calibrated=calibrated)
-    # run_plotter()
-    # confusion_plotter()
-    # print(collect_files('data'))
+    convert_gripper_time('data/ds20/bigberry/gripper_positions_trial_1.csv')

@@ -38,9 +38,11 @@ class Manager():
         self.dual_cls                   = self.model.dual_cls
 
         # Dataset Functions
-        full_set                        = signal_dataset.SignalDataset('data', self.dual_cls, multigrasp='Both', filtering=filtering, cropping=cropping, normalise=normalise, augment=augment)
-        # test_val                        = signal_dataset.SignalDataset('data', self.dual_cls, multigrasp='Only', filtering=filtering, cropping=cropping, normalise=normalise, augment=augment)
-        train_set, test_set, val_set    = torch.utils.data.random_split(full_set, [0.7, 0.2, 0.1])
+        full_dataset                    = signal_dataset.SignalDataset('data', self.dual_cls, multigrasp=None, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
+        mean, std                       = utils.compute_dataset_mean_std(full_dataset)
+        if normalise:
+            full_dataset                = signal_dataset.SignalDataset('data', self.dual_cls, multigrasp=None, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=mean, std=std)
+        train_set, test_set, val_set    = torch.utils.data.random_split(full_dataset, [0.7, 0.2, 0.1])
 
         print(f'Train Dataset Length: {len(train_set)}')
         print(f'Test Dataset Length:  {len(test_set)}')
@@ -376,16 +378,22 @@ class Manager():
 
 if __name__ == '__main__':
 
-    manager = Manager(file_pth='experiments/mult_grasp/run4', 
+    # TODO
+    # Variations on Test/ Train sets:
+    #   - Train on Multi-grasp only, test on normal
+    #   - Try removing various classes for training
+    #   - Train on only 1 class for either mat or tex
+
+    manager = Manager(file_pth='experiments/mult_grasp/normed', 
                       num_epochs=25, batch_size=20, shuffle=True,
                       distribution=[0.7, 0.2, 0.1],
                       tex_weight=1.0,
-                      mat_weight=1.05,
-                      early_stopping=5,
+                      mat_weight=1.5,
+                      early_stopping=3,
                       filtering=False,
                       cropping=False,
-                      normalise=False,
+                      normalise=True,
                       augment=False)
     
-    manager.run_training()
+    # manager.run_training()
     manager.run_testing()
