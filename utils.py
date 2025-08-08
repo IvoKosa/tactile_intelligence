@@ -2,6 +2,7 @@ import os, re, torch, random
 from torch.utils.data import DataLoader
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from datetime import datetime, timedelta
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -63,6 +64,8 @@ def df_convert_unix_ts(csv_path, timestamp_col='timestamp_us'):
 # ------------------------------------------------------------------------ New Dataset Management 
 
 def collect_file_info(root_dir, tex_classes, mat_classes):
+    tex_classes = sorted(tex_classes)
+    mat_classes = sorted(mat_classes)
 
     dict_list = []
     for dirpath, _, filenames in os.walk(root_dir):
@@ -106,9 +109,6 @@ def collect_file_info(root_dir, tex_classes, mat_classes):
                 'grasp_pos'     : multi_grasp_pos
             }
             dict_list.append(data_dict)
-    # sort_dict = [item for item in dict_list if item.get('multigrasp') is True]
-    # sort_dict = [item for item in dict_list if item.get('grasp_pos') == 'l']
-    # print(sort_dict)
     return(dict_list)
 
 def file_contains_str(file_str, search_str):
@@ -513,11 +513,14 @@ def confusion_plotter_dual(mat_cm, tex_cm,
         plotting (bool):     whether to plt.show() each
         normalize (str):     'true' (row‐wise), 'all', or anything else (counts)
     """
-    material_list = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
-    texture_list  = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
+    material_list = sorted(['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid'])        # <------------------------- add back , 'rigid'
+    texture_list  = sorted(['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry'])
+
     # texture_list, material_list = get_cls_lists('data')
 
     def _plot_cm(cm, classes, file_name):
+        print(cm)
+        print(classes)
         # Normalize
         if normalize.lower() == 'true':
             row_sums = cm.sum(axis=1, keepdims=True)
@@ -584,10 +587,10 @@ def confusion_plotter_dual(mat_cm, tex_cm,
 def loss_plots(save_pth,
             train_loss,
             val_loss,
-            train_acc,
-            val_acc,
-            gap_loss,
-            gap_acc,
+            train_acc=None,
+            val_acc=None,
+            gap_loss=None,
+            gap_acc=None,
             plotting=False):
     """
     Plot training/validation loss and accuracy, plus generalisation gaps.
@@ -615,30 +618,80 @@ def loss_plots(save_pth,
     plt.savefig(f'{save_pth}/loss_plot.png')
 
     # ——— Accuracy curves ———
-    plt.figure()
-    plt.plot(train_acc, label='Train Acc')
-    plt.plot(val_acc,   label='Val Acc')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.title('Training vs Validation Accuracy')
-    plt.legend()
-    plt.grid(True)
-    if plotting:
-        plt.show()
-    plt.savefig(f'{save_pth}/accuracy_plot.png')
+    if train_acc is not None and val_acc is not None:
+        plt.figure()
+        plt.plot(train_acc, label='Train Acc')
+        plt.plot(val_acc,   label='Val Acc')
+        plt.xlabel('Epoch')
+        plt.ylabel('Accuracy')
+        plt.title('Training vs Validation Accuracy')
+        plt.legend()
+        plt.grid(True)
+        if plotting:
+            plt.show()
+        plt.savefig(f'{save_pth}/accuracy_plot.png')
 
     # ——— Generalisation gap ———
-    plt.figure()
-    plt.plot(gap_loss, label='Loss Gap (Val − Train)')
-    plt.plot(gap_acc,  label='Acc Gap  (Train − Val)')
-    plt.xlabel('Epoch')
-    plt.title('Generalisation Gap Over Time')
-    plt.legend()
-    plt.grid(True)
-    if plotting:
-        plt.show()
-    plt.savefig(f'{save_pth}/generalisation_plot.png')
+    if gap_loss is not None and gap_acc is not None:
+        plt.figure()
+        plt.plot(gap_loss, label='Loss Gap (Val − Train)')
+        plt.plot(gap_acc,  label='Acc Gap  (Train − Val)')
+        plt.xlabel('Epoch')
+        plt.title('Generalisation Gap Over Time')
+        plt.legend()
+        plt.grid(True)
+        if plotting:
+            plt.show()
+        plt.savefig(f'{save_pth}/generalisation_plot.png')
 
+def compute_pairwise_accuracy(mat_true, mat_pred, tex_true, tex_pred, mat_classes, tex_classes):
+    mat_true = np.array(mat_true)
+    mat_pred = np.array(mat_pred)
+    tex_true = np.array(tex_true)
+    tex_pred = np.array(tex_pred)
+
+    num_mat = len(mat_classes)
+    num_tex = len(tex_classes)
+
+    # Create dictionaries to track results per pair
+    accuracy_table = np.full((num_tex, num_mat), np.nan)  # texture on rows, material on columns
+
+    # Group by (material, texture)
+    for m in range(num_mat):
+        for t in range(num_tex):
+            indices = np.where((mat_true == m) & (tex_true == t))[0]
+            if len(indices) == 0:
+                continue
+
+            mat_correct = (mat_pred[indices] == mat_true[indices]).astype(np.float32)
+            tex_correct = (tex_pred[indices] == tex_true[indices]).astype(np.float32)
+
+            # Compute joint accuracy (or average of the two)
+            joint_accuracy = (mat_correct + tex_correct) / 2.0
+            accuracy_table[t, m] = np.mean(joint_accuracy)
+
+    return accuracy_table
+
+def plot_joint_accuracy_table(accuracy_table, mat_classes, tex_classes, save_path):
+    plt.figure(figsize=(12, 8))
+    ax = sns.heatmap(
+        accuracy_table, 
+        xticklabels=mat_classes, 
+        yticklabels=tex_classes, 
+        annot=True, 
+        fmt=".2f", 
+        cmap='Blues', 
+        cbar_kws={'label': 'Avg Accuracy'}
+    )
+    ax.set_xlabel("Material Classes")
+    ax.set_ylabel("Texture Classes")
+    ax.set_title("Joint Accuracy Table: Material (X) vs Texture (Y)")
+
+    plt.tight_layout()
+    # if plotting:
+    #     plt.show()
+    plt.savefig(save_path)
+    
 def split_dataset(
     dataset,
     ratios,

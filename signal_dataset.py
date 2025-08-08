@@ -2,7 +2,8 @@ import utils, torch
 from torch.utils.data import Dataset
 
 class SignalDataset(Dataset):
-    def __init__(self, root_dir, dual_cls, multigrasp, filtering, cropping, normalise, augment, mean=None, std=None):
+    def __init__(self, root_dir, dual_cls, multigrasp, filtering, cropping, normalise, augment, 
+                 mat_classes=None, tex_classes=None, mean=None, std=None):
         super().__init__()
         self.root_dir       = root_dir
         self.dual_cls       = dual_cls
@@ -12,14 +13,19 @@ class SignalDataset(Dataset):
         self.augment        = augment
         self.mean           = mean
         self.std            = std
-        self.mat_classes    = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
-        self.tex_classes    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
+        self.mat_classes    = sorted(['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid'])
+        self.tex_classes    = sorted(['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry'])
         self.dict_list      = utils.collect_file_info(root_dir, self.tex_classes, self.mat_classes)
 
         if multigrasp is True or multigrasp is False:
             self.dict_list = [item for item in self.dict_list if item.get('multigrasp') is multigrasp]
         elif multigrasp in ['h1', 'h2', 'l', 'm', 'r']:
             self.dict_list = [item for item in self.dict_list if item.get('grasp_pos') is multigrasp]
+
+        if mat_classes is not None:
+            self.dict_list = [item for item in self.dict_list if item.get("mat_cls_str") in set(mat_classes)]
+        if tex_classes is not None:
+            self.dict_list = [item for item in self.dict_list if item.get("tex_cls_str") in set(tex_classes)]
 
     def __len__(self):
         return len(self.dict_list)
@@ -61,3 +67,7 @@ class SignalDataset(Dataset):
     def add_gaussian_noise(self, x, std=0.01):
         noise = torch.randn_like(x) * std
         return x + noise
+
+if __name__ =='__main__':
+    dat = SignalDataset('data', True, None, False, False, False, False)
+    print(len(dat))

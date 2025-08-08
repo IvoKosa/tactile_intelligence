@@ -10,11 +10,11 @@
         0.1
     ],
     "tex_weight": 1.0,
-    "mat_weight": 1.05,
-    "early_stopping": 5,
+    "mat_weight": 1.5,
+    "early_stopping": 3,
     "filtering": false,
     "cropping": false,
-    "normalise": false,
+    "normalise": true,
     "augment": false,
     "file_pth": "experiments/mult_grasp/run4"
 }

@@ -46,7 +46,7 @@ class Tactile_CNN(nn.Module):
         return mat_out, tex_out
 
 if __name__ =='__main__':
-    input = torch.randn(1, 24, 400)
+    input = torch.randn(1, 24, 850)
 
     tac_CNN = Tactile_CNN()
 
