@@ -13,19 +13,19 @@ class SignalDataset(Dataset):
         self.augment         = augment
         self.mean            = mean
         self.std             = std
-        self.mat_classes_all = sorted(['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid'])  # Add back rigid class if needed
-        self.tex_classes_all = sorted(['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry'])
-        self.dict_list       = utils.collect_file_info(root_dir, self.tex_classes_all, self.mat_classes_all)
+        self.mat_classes     = mat_classes if mat_classes is not None else sorted(['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid'])
+        self.tex_classes     = tex_classes if tex_classes is not None else sorted(['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry'])
+        self.dict_list       = utils.collect_file_info(root_dir, self.mat_classes, self.tex_classes)
 
         if multigrasp is True or multigrasp is False:
             self.dict_list = [item for item in self.dict_list if item.get('multigrasp') is multigrasp]
         elif multigrasp in ['h1', 'h2', 'l', 'm', 'r']:
             self.dict_list = [item for item in self.dict_list if item.get('grasp_pos') is multigrasp]
 
-        if mat_classes is not None:
-            self.dict_list = [item for item in self.dict_list if item.get("mat_cls_str") in set(mat_classes)]
-        if tex_classes is not None:
-            self.dict_list = [item for item in self.dict_list if item.get("tex_cls_str") in set(tex_classes)]
+        # if mat_classes is not None:
+        #     self.dict_list = [item for item in self.dict_list if item.get("mat_cls_str") in set(mat_classes)]
+        # if tex_classes is not None:
+        #     self.dict_list = [item for item in self.dict_list if item.get("tex_cls_str") in set(tex_classes)]
 
     def __len__(self):
         return len(self.dict_list)

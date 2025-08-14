@@ -38,38 +38,38 @@ class Manager():
         self.data_partition             = data_partition
 
         # Class Data
-        self.tex_classes                = sorted(['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry'])
-        self.mat_classes                = sorted(['ds20', 'ds30', 'ef10', 'ef30', 'ef50'])
+        self.tex_classes                = sorted(['bigberry', 'citrus', 'rough', 'smallberry']) #, 'smooth', 'strawberry'
+        self.mat_classes                = sorted(['ds20']) # , 'ds30', 'ef10', 'ef30', 'ef50'
 
         # Dataset and Model
         self.device                     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.mat_loss                   = nn.CrossEntropyLoss()
         self.tex_loss                   = nn.CrossEntropyLoss()
 
-        self.model                      = latent_AE.Tactile_CNN().to(self.device)
+        self.model                      = model_AE.Tactile_CNN().to(self.device)
         self.AE_loss                    = nn.MSELoss()
 
         if data_partition:
-            train_set              = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
-            test_set               = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
+            train_set              = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
+            test_set               = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
             # test_set               = signal_dataset.SignalDataset('data', True, multigrasp=False, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
 
             if normalise:
                 self.train_mean, self.train_std = utils.compute_dataset_mean_std(train_set)
-                train_set           = signal_dataset.SignalDataset('data_final/multigrasp_train', True, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=self.train_mean, std=self.train_std)
+                train_set           = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=self.train_mean, std=self.train_std, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
                 
                 self.test_mean, self.test_std = utils.compute_dataset_mean_std(test_set)
-                test_set           = signal_dataset.SignalDataset('data_final/multigrasp_test', True, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=self.test_mean, std=self.test_std)
+                test_set           = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=self.test_mean, std=self.test_std, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
 
             g = torch.Generator().manual_seed(42)
             test_set, val_set    = torch.utils.data.random_split(test_set, [0.5, 0.5], generator=g)
         else:
             # All Dataset
-            self.full_dataset               = signal_dataset.SignalDataset('data_final', True, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
+            self.full_dataset               = signal_dataset.SignalDataset('data_final', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
             
             if normalise:
                 self.mean, self.std         = utils.compute_dataset_mean_std(self.full_dataset)
-                self.full_dataset           = signal_dataset.SignalDataset('data_final', True, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=self.mean, std=self.std)
+                self.full_dataset           = signal_dataset.SignalDataset('data_final', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=self.mean, std=self.std, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
             
             g = torch.Generator().manual_seed(42)
             train_set, test_set, val_set    = torch.utils.data.random_split(self.full_dataset, self.distribution, generator=g)        
@@ -160,7 +160,7 @@ class Manager():
             train_acc      = running_correct / running_total
             train_acc_plot_data.append(train_acc)
             train_loss_plot_data.append(avg_train_loss)
-            print(f"Epoch [{epoch+1}] Train Loss: {avg_train_loss:.4f}") 
+            print(f"Epoch [{epoch+1}] Train Loss: {avg_train_loss:.4f}, Train Acc: train_acc") 
                 
             # ——————————————————————————————————————— Validation pass
             self.model.eval()
@@ -304,12 +304,12 @@ class Manager():
         tex_cm_file = f"{self.file_pth}/confusion_matrix_texture.png"
         comb_file   = f'{self.file_pth}/confusion_matrix_combined.png'
 
-        materials = test_data.dataset.dataset.mat_classes
-        textures  = test_data.dataset.dataset.tex_classes
-        comb_classes = [f"{m}_{t}" for m, t in itertools.product(materials, textures)]
+        # materials = test_data.dataset.dataset.mat_classes
+        # textures  = test_data.dataset.dataset.tex_classes
+        comb_classes = [f"{m}_{t}" for m, t in itertools.product(self.mat_classes, self.mat_classes)]
 
-        utils.plot_confusion_matrix(mat_cm, materials, mat_cm_file)
-        utils.plot_confusion_matrix(tex_cm, textures, tex_cm_file)
+        utils.plot_confusion_matrix(mat_cm, self.mat_classes, mat_cm_file)
+        utils.plot_confusion_matrix(tex_cm, self.tex_classes, tex_cm_file)
         utils.plot_confusion_matrix(combined_cm, comb_classes, comb_file)
 
         # utils.confusion_plotter_dual(
@@ -428,7 +428,7 @@ if __name__ == '__main__':
     #   - Try removing various classes for training
     #   - Train on only 1 class for either mat or tex
 
-    manager = Manager(file_pth='experiments/autoencoder/run4', 
+    manager = Manager(file_pth='experiments/autoencoder/run5_only_ds20', 
                       num_epochs=75, batch_size=20, shuffle=True,
                       multigrasp=None,
                       distribution=[0.7, 0.2, 0.1],
@@ -443,6 +443,6 @@ if __name__ == '__main__':
                       augment=False,
                       data_partition=True)
     
-    manager.run_training(manager.train_data, manager.val_data)
-    manager.run_testing(manager.test_data)
-    # manager.reconstruction_tst()
+    # manager.run_training(manager.train_data, manager.val_data)
+    # manager.run_testing(manager.test_data)
+    manager.reconstruction_tst()

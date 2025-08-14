@@ -63,7 +63,7 @@ def df_convert_unix_ts(csv_path, timestamp_col='timestamp_us'):
 
 # ------------------------------------------------------------------------ New Dataset Management 
 
-def collect_file_info(root_dir, tex_classes, mat_classes):
+def collect_file_info(root_dir, tex_classes, mat_classes, singlegrasp_limit=20):
     tex_classes = sorted(tex_classes)
     mat_classes = sorted(mat_classes)
 
@@ -79,6 +79,8 @@ def collect_file_info(root_dir, tex_classes, mat_classes):
 
             tex_cls, tex_idx = file_cls_finder(full_pth, tex_classes)
             mat_cls, mat_idx = file_cls_finder(full_pth, mat_classes)
+            if tex_idx is None or mat_idx is None:
+                continue
             mult_bool        = file_contains_str(full_pth, 'multigrasp')
             gripper_idx      = get_file_index(dirpath, fname)
             gripper_pth      = rf'{dirpath}/gripper_positions_trial_{gripper_idx}.csv'
@@ -120,7 +122,9 @@ def file_cls_finder(file_str, cls_list):
             sorted_cls = sorted(cls_list)
             position = sorted_cls.index(cls)
             return cls, position
-    raise ValueError("None of the candidate strings were found in the path.")
+        
+    return (None, None)
+    # raise ValueError("None of the candidate strings were found in the path.")
 
 def get_file_index(directory_path: str, filename: str) -> int:
     if not os.path.isdir(directory_path):

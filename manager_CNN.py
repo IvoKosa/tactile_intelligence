@@ -52,17 +52,17 @@ class Manager():
         # train_set, test_set, val_set    = torch.utils.data.random_split(self.full_dataset, [0.7, 0.2, 0.1])
 
         # New Dataset Loading
-        train_set              = signal_dataset.SignalDataset('data_final/multigrasp_train', True, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
-        test_set               = signal_dataset.SignalDataset('data_final/multigrasp_test', True, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
+        train_set              = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
+        test_set               = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
         
         # test_set               = signal_dataset.SignalDataset('data', True, multigrasp=False, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
 
         if normalise:
             self.train_mean, self.train_std = utils.compute_dataset_mean_std(train_set)
-            train_set           = signal_dataset.SignalDataset('data_final/multigrasp_train', True, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=self.train_mean, std=self.train_std)
+            train_set           = signal_dataset.SignalDataset('data_final/multigrasp_train',  multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=self.train_mean, std=self.train_std)
             
             self.test_mean, self.test_std = utils.compute_dataset_mean_std(test_set)
-            test_set           = signal_dataset.SignalDataset('data_final/multigrasp_test', True, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=self.test_mean, std=self.test_std)
+            test_set           = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=self.test_mean, std=self.test_std)
 
         g = torch.Generator().manual_seed(42)
         test_set, val_set    = torch.utils.data.random_split(test_set, [0.5, 0.5], generator=g)
