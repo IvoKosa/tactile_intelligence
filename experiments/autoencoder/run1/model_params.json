@@ -1,6 +1,7 @@
 {
-    "num_epochs": 50,
+    "num_epochs": 75,
     "batch_size": 20,
+    "early_stopping": 10,
     "shuffle_batches": true,
     "learning_rate": 0.001,
     "weight_decay": 0.01,
@@ -9,9 +10,12 @@
         0.2,
         0.1
     ],
+    "tex_weight": 1.0,
+    "mat_weight": 1.5,
     "filtering": false,
-    "cropping": false,
+    "cropping": true,
     "normalise": true,
     "augment": false,
-    "file_pth": "experiments/autoencoder/run1"
+    "file_pth": "experiments/autoencoder/run1",
+    "Day2-3_partition": true
 }

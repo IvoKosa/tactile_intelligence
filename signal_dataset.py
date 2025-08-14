@@ -2,20 +2,20 @@ import utils, torch
 from torch.utils.data import Dataset
 
 class SignalDataset(Dataset):
-    def __init__(self, root_dir, dual_cls, multigrasp, filtering, cropping, normalise, augment, 
+    def __init__(self, root_dir, multigrasp, filtering, cropping, normalise, augment, dual_cls=True,
                  mat_classes=None, tex_classes=None, mean=None, std=None):
         super().__init__()
-        self.root_dir       = root_dir
-        self.dual_cls       = dual_cls
-        self.filtering      = filtering
-        self.cropping       = cropping
-        self.normalise      = normalise
-        self.augment        = augment
-        self.mean           = mean
-        self.std            = std
-        self.mat_classes    = sorted(['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid'])
-        self.tex_classes    = sorted(['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry'])
-        self.dict_list      = utils.collect_file_info(root_dir, self.tex_classes, self.mat_classes)
+        self.root_dir        = root_dir
+        self.dual_cls        = dual_cls
+        self.filtering       = filtering
+        self.cropping        = cropping
+        self.normalise       = normalise
+        self.augment         = augment
+        self.mean            = mean
+        self.std             = std
+        self.mat_classes_all = sorted(['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid'])  # Add back rigid class if needed
+        self.tex_classes_all = sorted(['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry'])
+        self.dict_list       = utils.collect_file_info(root_dir, self.tex_classes_all, self.mat_classes_all)
 
         if multigrasp is True or multigrasp is False:
             self.dict_list = [item for item in self.dict_list if item.get('multigrasp') is multigrasp]

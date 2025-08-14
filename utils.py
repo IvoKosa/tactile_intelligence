@@ -22,9 +22,9 @@ def data_loader(csv_path, cropping, filtering, calibrated=True):
         df = butterworth_filter(df)
 
     if cropping:
-        df = crop_df(df, center_pct=50, window_size=200) # Cropped to the sensor contact 
+        df = crop_df(df, center_pct=50, window_size=150) # Cropped to the sensor contact 
     else:
-        df = crop_df(df, center_pct=50, window_size=425) # Cropped approx 50 datapoints off each end. Effectively full signal
+        df = crop_df(df, center_pct=50, window_size=424) # Cropped approx 50 datapoints off each end. Effectively full signal
     
     if calibrated:
         df = df.drop(columns=df.columns[0 : 12])
@@ -165,6 +165,13 @@ def compute_dataset_mean_std(dataset, batch_size=32, num_workers=4):
     var  = (s2 / n) - mean**2
     std  = torch.sqrt(var) # type: ignore
     return mean, std
+
+def zscore_denormalize(x, mean, std):
+    # x: (B, C, L) in z-score space -> original space
+    C = x.shape[1]
+    mean = mean.view(1, C, 1).to(x.device)
+    std  = std.view(1, C, 1).to(x.device)
+    return x * std + mean
 
 def convert_gripper_time(gripper_pth):
     df = pd.read_csv(gripper_pth)
@@ -355,7 +362,8 @@ def sensor_plotter(signal1_df,
                     signal2_df=None,
                     signal2_alpha=0.5,
                     plot_mode='taxel',
-                    calibrated=True):
+                    calibrated=True,
+                    save_pth=None):
     
     has_filt = signal2_df is not None
 
@@ -386,16 +394,19 @@ def sensor_plotter(signal1_df,
                         col = f'{dim}{sensor}_calib'
                     else:
                         col = f'{dim}{sensor}'
-                    ax.plot(signal1_df.index, signal1_df[col], alpha=raw_alpha, lw=1, label=f'{col} (raw)')
+                    ax.plot(signal1_df.index, signal1_df[col], alpha=raw_alpha, lw=1, label=f'{col[:-6]} Raw')
                     if has_filt:
-                        ax.plot(signal2_df.index, signal2_df[col], lw=2, label=f'{col} (filt)')             # type: ignore
+                        ax.plot(signal2_df.index, signal2_df[col], lw=2, label=f'{col[:-6]} Reconstructed')           # type: ignore
                 ax.set_ylim(y_min, y_max)
                 ax.set_ylabel('Cilia Deformation')
                 ax.set_title(f'Taxel {sensor}')
                 ax.legend(loc='upper right', fontsize='small')
             axes[-1].set_xlabel('Time (s)')                                                     # type: ignore
             plt.tight_layout()
-            plt.show()
+            if save_pth is not None:
+                plt.savefig(save_pth)
+            else:
+                plt.show()
 
         case 'xyz':
             axes = _make_subplots(3)
@@ -405,16 +416,19 @@ def sensor_plotter(signal1_df,
                         col = f'{dim}{sensor}_calib'
                     else:
                         col = f'{dim}{sensor}'
-                    ax.plot(signal1_df.index, signal1_df[col], alpha=raw_alpha, lw=1, label=f'{col} (raw)')
+                    ax.plot(signal1_df.index, signal1_df[col], alpha=raw_alpha, lw=1, label=f'{col[:-6]} Raw')
                     if has_filt:
-                        ax.plot(signal2_df.index, signal2_df[col], lw=2, label=f'{col} (filt)')             # type: ignore
+                        ax.plot(signal2_df.index, signal2_df[col], lw=2, label=f'{col[:-6]} Reconstructed')             # type: ignore
                 ax.set_ylim(y_min, y_max)
                 ax.set_ylabel('Cilia Deformation')
                 ax.set_title(f'Dimension: {dim.upper()}')
                 ax.legend(loc='upper right', fontsize='small')
             axes[-1].set_xlabel('Time (s)')                                                     # type: ignore
             plt.tight_layout()
-            plt.show()
+            if save_pth is not None:
+                plt.savefig(save_pth)
+            else:
+                plt.show()
 
         case _:
             raise ValueError("Choose plot_mode='taxel' or 'xyz'")
@@ -513,7 +527,7 @@ def confusion_plotter_dual(mat_cm, tex_cm,
         plotting (bool):     whether to plt.show() each
         normalize (str):     'true' (row‐wise), 'all', or anything else (counts)
     """
-    material_list = sorted(['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid'])        # <------------------------- add back , 'rigid'
+    material_list = sorted(['ds20', 'ds30', 'ef10', 'ef30', 'ef50'])        # <------------------------- add back , 'rigid'
     texture_list  = sorted(['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry'])
 
     # texture_list, material_list = get_cls_lists('data')
@@ -583,6 +597,67 @@ def confusion_plotter_dual(mat_cm, tex_cm,
     _plot_cm(mat_cm, material_list, mat_file_name)
     # Plot texture (6 classes)
     _plot_cm(tex_cm,  texture_list,  tex_file_name)
+
+def plot_confusion_matrix(cm, classes, file_name, plotting=False, normalize='true'):
+    print(cm)
+    print(classes)
+    # Normalize
+    if normalize.lower() == 'true':
+        row_sums = cm.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1
+        cm_pct = (cm.astype(float) / row_sums) * 100
+    elif normalize.lower() == 'all':
+        total = cm.sum() or 1
+        cm_pct = (cm.astype(float) / total) * 100
+    else:
+        cm_pct = cm.astype(float)
+
+    # Mask zeros
+    cm_mask = np.ma.masked_where(cm_pct == 0, cm_pct)
+    # cmap = plt.cm.viridis.copy() # type: ignore
+    cmap = plt.cm.Blues.copy() # type: ignore                    
+    cmap.set_bad(color='white')
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    cax = ax.matshow(cm_mask, cmap=cmap, vmin=0, vmax=100)
+    cbar = fig.colorbar(cax)
+    cbar.ax.set_ylabel('Percentage', rotation=270, labelpad=15)
+    cbar.ax.yaxis.set_major_formatter(lambda x, pos: f'{x:.0f}%')
+
+    n = len(classes)
+    # gridlines
+    ax.set_xticks(np.arange(-0.5, n, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, n, 1), minor=True)
+    ax.grid(which='minor', color='black', linestyle=':', linewidth=0.5)
+    ax.tick_params(which='minor', bottom=False, left=False)
+
+    # axis labels
+    ax.set_xticks(range(n))
+    ax.set_xticklabels(classes, rotation=90, fontsize=8)
+    ax.set_yticks(range(n))
+    ax.set_yticklabels(classes, fontsize=8)
+    ax.xaxis.set_label_position('top')
+    ax.xaxis.tick_top()
+    ax.set_xlabel('Predicted label', labelpad=10)
+    ax.set_ylabel('True label')
+
+    # annotate
+    for i in range(n):
+        for j in range(n):
+            if cm[i, j] != 0:
+                val = round(cm_pct[i, j], 1)
+                if str(val)[-1] == '0':
+                    val = int(val)
+                if val <= 50:
+                    ax.text(j, i, f'{val}', ha='center', va='center', color='black', fontsize=10)
+                else:
+                    ax.text(j, i, f'{val}', ha='center', va='center', color='white', fontsize=10)
+
+    plt.tight_layout()
+    if plotting:
+        plt.show()
+    plt.savefig(file_name, dpi=300)
+    plt.close(fig)
 
 def loss_plots(save_pth,
             train_loss,
@@ -740,10 +815,14 @@ def split_dataset(
         raise ValueError('Split must be either: test/train/val')
 
 if __name__ == '__main__':
+    file_pth = r'data_final/multigrasp_test/ds20_multigrasp/bigberry_ds20/bigberry_ds20h1/sensor0_data_20250805_182121.csv'
+
+    signal_df  = data_loader(file_pth, False, True)
+    cropped_df = data_loader(file_pth, True, True)
+
+    sensor_plotter(signal_df, cropped_df)
 
     # root_dir = 'data'
     # mat_classes    = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
     # tex_classes    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
     # collect_file_info(root_dir, mat_classes, tex_classes)
-
-    convert_gripper_time('data/ds20/bigberry/gripper_positions_trial_1.csv')

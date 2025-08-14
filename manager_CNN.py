@@ -1,5 +1,5 @@
 # General Imports
-import signal_dataset, model_1DCNN, model_AE, utils, json, os, shutil
+import signal_dataset, model_1DCNN, model_AE, better_lstm, utils, json, os, shutil, itertools
 import matplotlib.pyplot as plt
 
 # Pytorch Imports
@@ -34,8 +34,9 @@ class Manager():
 
         # Dataset and Model
         self.device                     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model                      = model_1DCNN.Tactile_CNN().to(self.device)
-        self.dual_cls                   = self.model.dual_cls
+        self.model                      = better_lstm.DualHeadLSTM().to(self.device)
+        # self.model                      = model_1DCNN.Tactile_CNN().to(self.device)
+        self.dual_cls                   = True # Override if needed: model.dual_
         if self.dual_cls:
             self.mat_loss               = nn.CrossEntropyLoss()
             self.tex_loss               = nn.CrossEntropyLoss()
@@ -43,11 +44,28 @@ class Manager():
             self.loss                   = nn.CrossEntropyLoss()
     
         # Dataset Functions
-        self.full_dataset               = signal_dataset.SignalDataset('data', self.dual_cls, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
+        # self.full_dataset               = signal_dataset.SignalDataset('data', self.dual_cls, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
+        
+        # if normalise:
+        #     mean, std                   = utils.compute_dataset_mean_std(self.full_dataset)
+        #     self.full_dataset           = signal_dataset.SignalDataset('data', self.dual_cls, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=mean, std=std)
+        # train_set, test_set, val_set    = torch.utils.data.random_split(self.full_dataset, [0.7, 0.2, 0.1])
+
+        # New Dataset Loading
+        train_set              = signal_dataset.SignalDataset('data_final/multigrasp_train', True, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
+        test_set               = signal_dataset.SignalDataset('data_final/multigrasp_test', True, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
+        
+        # test_set               = signal_dataset.SignalDataset('data', True, multigrasp=False, filtering=filtering, cropping=cropping, normalise=False, augment=augment)
+
         if normalise:
-            mean, std                   = utils.compute_dataset_mean_std(self.full_dataset)
-            self.full_dataset           = signal_dataset.SignalDataset('data', self.dual_cls, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=mean, std=std)
-        train_set, test_set, val_set    = torch.utils.data.random_split(self.full_dataset, [0.7, 0.2, 0.1])
+            self.train_mean, self.train_std = utils.compute_dataset_mean_std(train_set)
+            train_set           = signal_dataset.SignalDataset('data_final/multigrasp_train', True, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=self.train_mean, std=self.train_std)
+            
+            self.test_mean, self.test_std = utils.compute_dataset_mean_std(test_set)
+            test_set           = signal_dataset.SignalDataset('data_final/multigrasp_test', True, multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=augment, mean=self.test_mean, std=self.test_std)
+
+        g = torch.Generator().manual_seed(42)
+        test_set, val_set    = torch.utils.data.random_split(test_set, [0.5, 0.5], generator=g)
 
         print(f'Train Dataset Length: {len(train_set)}')
         print(f'Test Dataset Length:  {len(test_set)}')
@@ -188,7 +206,7 @@ class Manager():
                 f"Acc: {gap_acc:.4f}\n")
 
             # ——— Early stopping bookkeeping ———
-            if avg_val_loss < min_val_loss:
+            if avg_val_loss <= min_val_loss:
                 print('  → New best validation Loss.')
                 min_val_loss = avg_val_loss
                 epoch_no_improvement = 0
@@ -273,16 +291,29 @@ class Manager():
             print(f"\nTexture Test Accuracy: {tex_acc:.4f}")
             print("\nTexture Classification Report:\n", tex_report)
 
+            # Combined
+            combined_true = list(zip(mat_true, tex_true))
+            combined_pred = list(zip(mat_pred, tex_pred))
+
+            combined_true_str = [f"{m}_{t}" for m, t in combined_true]
+            combined_pred_str = [f"{m}_{t}" for m, t in combined_pred]
+
+            combined_acc = accuracy_score(combined_true_str, combined_pred_str)
+            combined_report = classification_report(combined_true_str, combined_pred_str, digits=4)
+            combined_cm = confusion_matrix(combined_true_str, combined_pred_str)
+
             # Plot both with confusion_plotter_dual
             mat_cm_file = f"{self.file_pth}/confusion_matrix_material.png"
             tex_cm_file = f"{self.file_pth}/confusion_matrix_texture.png"
-            utils.confusion_plotter_dual(
-                mat_cm, tex_cm,
-                mat_cm_file, tex_cm_file,
-                plotting=False,
-                normalize='true'
-            )
+            comb_file   = f'{self.file_pth}/confusion_matrix_combined.png'
 
+            materials = test_data.dataset.dataset.mat_classes
+            textures  = test_data.dataset.dataset.tex_classes
+            comb_classes = [f"{m}_{t}" for m, t in itertools.product(materials, textures)]
+
+            utils.plot_confusion_matrix(mat_cm, materials, mat_cm_file)
+            utils.plot_confusion_matrix(tex_cm, textures, tex_cm_file)
+            utils.plot_confusion_matrix(combined_cm, comb_classes, comb_file)
             # Save reports
             report_path = f'{self.file_pth}/test_report.txt'
             with open(report_path, 'w', encoding='utf-8') as f:
@@ -290,6 +321,8 @@ class Manager():
                 f.write(mat_report)                                                                 # type: ignore
                 f.write("\n\n=== Texture Classification Report ===\n")
                 f.write(tex_report)                                                                 # type: ignore
+                f.write("\n\n=== Dual Classification Report ===\n")
+                f.write(combined_report)                                                            # type: ignore
 
         else:
             y_true = torch.cat(all_targets).numpy()                                                 # type: ignore
@@ -370,6 +403,7 @@ class Manager():
             'num_epochs'        : self.num_epochs,
             'batch_size'        : self.batch_size,
             'shuffle_batches'   : self.shuffle,
+            'early_stopping'    : self.early_stopping,
             'learning_rate'     : self.learning_rate,
             'weight_decay'      : self.weight_decay,
             'test_train_split'  : self.distribution,
@@ -401,15 +435,15 @@ if __name__ == '__main__':
     #   - Try removing various classes for training
     #   - Train on only 1 class for either mat or tex
 
-    manager = Manager(file_pth='experiments/tst/run1',
-                      num_epochs=25, batch_size=20, shuffle=True,
-                      multigrasp=None,
+    manager = Manager(file_pth='experiments/CNN/run3_partition_crop',
+                      num_epochs=50, batch_size=20, shuffle=True,
+                      multigrasp=True,
                       distribution=[0.7, 0.2, 0.1],
                       tex_weight=1.0,
                       mat_weight=1.5,
-                      early_stopping=5,
+                      early_stopping=7,
                       filtering=False,
-                      cropping=False,
+                      cropping=True,
                       normalise=True,
                       augment=False)
     
