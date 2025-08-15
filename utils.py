@@ -63,9 +63,13 @@ def df_convert_unix_ts(csv_path, timestamp_col='timestamp_us'):
 
 # ------------------------------------------------------------------------ New Dataset Management 
 
-def collect_file_info(root_dir, tex_classes, mat_classes, singlegrasp_limit=20):
+def collect_file_info(root_dir, tex_classes, mat_classes, singlegrasp_limit=None):
     tex_classes = sorted(tex_classes)
     mat_classes = sorted(mat_classes)
+    tex_max     = [0] * len(tex_classes)
+    mat_max     = [0] * len(mat_classes)
+
+    cls_max     = [0] * len(tex_classes)  * len(mat_classes)
 
     dict_list = []
     for dirpath, _, filenames in os.walk(root_dir):
@@ -79,8 +83,16 @@ def collect_file_info(root_dir, tex_classes, mat_classes, singlegrasp_limit=20):
 
             tex_cls, tex_idx = file_cls_finder(full_pth, tex_classes)
             mat_cls, mat_idx = file_cls_finder(full_pth, mat_classes)
+
             if tex_idx is None or mat_idx is None:
                 continue
+
+            if file_contains_str(dirpath, '200') and singlegrasp_limit is not None:
+                cls_idx = mat_idx * len(tex_classes) + tex_idx
+                cls_max[cls_idx] += 1
+                if cls_max[cls_idx] >= singlegrasp_limit:
+                    continue
+
             mult_bool        = file_contains_str(full_pth, 'multigrasp')
             gripper_idx      = get_file_index(dirpath, fname)
             gripper_pth      = rf'{dirpath}/gripper_positions_trial_{gripper_idx}.csv'
@@ -92,7 +104,8 @@ def collect_file_info(root_dir, tex_classes, mat_classes, singlegrasp_limit=20):
                         pos = char
                         break
                 if pos == None:
-                    raise KeyError('Grasp Pos Unknown')
+                    # raise KeyError('Grasp Pos Unknown')
+                    pos = None
                 if pos == '1' or pos == '2':
                     pos = 'h' + pos
                 multi_grasp_pos     = pos

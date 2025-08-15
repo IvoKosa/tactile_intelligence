@@ -38,8 +38,8 @@ class Manager():
         self.data_partition             = data_partition
 
         # Class Data
-        self.tex_classes                = sorted(['bigberry', 'citrus', 'rough', 'smallberry']) #, 'smooth', 'strawberry'
-        self.mat_classes                = sorted(['ds20']) # , 'ds30', 'ef10', 'ef30', 'ef50'
+        self.tex_classes                = sorted(['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']) #, 'smooth', 'strawberry'
+        self.mat_classes                = sorted(['ds20', 'ds30', 'ef10', 'ef30', 'ef50']) # , 'ef50'
 
         # Dataset and Model
         self.device                     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -428,14 +428,14 @@ if __name__ == '__main__':
     #   - Try removing various classes for training
     #   - Train on only 1 class for either mat or tex
 
-    manager = Manager(file_pth='experiments/autoencoder/run5_only_ds20', 
+    manager = Manager(file_pth='experiments/autoencoder/run6_singlegrasp', 
                       num_epochs=75, batch_size=20, shuffle=True,
                       multigrasp=None,
                       distribution=[0.7, 0.2, 0.1],
                       tex_weight=1.0,
                       mat_weight=1.5,
                       reconstruct_weight=1.0,
-                      early_stopping=10,
+                      early_stopping=5,
                       reconstruct=True,
                       filtering=False,
                       cropping=True,
@@ -445,4 +445,4 @@ if __name__ == '__main__':
     
     # manager.run_training(manager.train_data, manager.val_data)
     # manager.run_testing(manager.test_data)
-    manager.reconstruction_tst()
+    # manager.reconstruction_tst()
