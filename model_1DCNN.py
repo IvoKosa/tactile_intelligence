@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class Tactile_CNN(nn.Module):
-    def __init__(self, num_features=24, mat_classes=6, tex_classes=6):
-        super(Tactile_CNN, self).__init__()
+class Model(nn.Module):
+    def __init__(self, num_features=24, mat_classes=5, tex_classes=6):
+        super(Model, self).__init__()
 
         self.dual_cls   = True
 
@@ -44,13 +44,3 @@ class Tactile_CNN(nn.Module):
         mat_out = self.mat_fc2(self.mat_dropout(F.relu(self.mat_fc1(x))))
         tex_out = self.tex_fc2(self.tex_dropout(F.relu(self.tex_fc1(x))))
         return mat_out, tex_out
-
-if __name__ =='__main__':
-    input = torch.randn(1, 24, 850)
-
-    tac_CNN = Tactile_CNN()
-
-    out = tac_CNN(input)
-
-    print(out)
-

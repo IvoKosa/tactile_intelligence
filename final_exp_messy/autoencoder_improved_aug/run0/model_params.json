@@ -1,0 +1,29 @@
+{
+    "num_epochs": 75,
+    "batch_size": 20,
+    "early_stopping": 8,
+    "shuffle_batches": true,
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "test_train_split": [
+        0.7,
+        0.2,
+        0.1
+    ],
+    "tex_weight": 1.0,
+    "mat_weight": 2.0,
+    "filtering": true,
+    "cropping": true,
+    "normalise": true,
+    "augment": true,
+    "file_pth": "final_exp/autoencoder_improved_aug/run0",
+    "Day2-3_partition": true,
+    "tex_classes": [
+        "rough",
+        "smallberry"
+    ],
+    "mat_classes": [
+        "ef10",
+        "ef50"
+    ]
+}

@@ -61,10 +61,10 @@ class Tactile_CNN(nn.Module):
             nn.Linear(128, tex_classes)
         )
 
-    def forward(self, x, classify=False):
+    def forward(self, x, reconstruct=False):
         z = self.encoder(x)
-        if classify:
-            return self.mat_classifier(z), self.tex_classifier(z)
-        else: 
+        if reconstruct:
             x_recon = self.decoder(z)
             return x_recon[..., :x.shape[-1]]
+        else: 
+            return self.mat_classifier(z), self.tex_classifier(z)

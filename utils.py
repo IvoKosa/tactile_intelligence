@@ -6,25 +6,28 @@ import seaborn as sns
 from datetime import datetime, timedelta
 from pathlib import Path
 import matplotlib.pyplot as plt
-from collections import defaultdict
 from scipy.signal import butter, filtfilt
-from typing import List, Dict, Tuple
+from typing import List, Dict
 
 # ------------------------------------------------------------------------ Loading Functions
 
 # Load Data from Single CSV path
-def data_loader(csv_path, cropping, filtering, calibrated=True):
+def data_loader(csv_path, cropping, filtering, calibrated=True, augment=True):
     df = pd.read_csv(csv_path) 
     df.set_index('timestamp', inplace=True)
     df = normalise_df_time(df)
+
+    aug_rand = random.random()
+    if augment and aug_rand <= 0.4:
+        df = augment_data(df)
 
     if filtering:
         df = butterworth_filter(df)
 
     if cropping:
-        df = crop_df(df, center_pct=50, window_size=150) # Cropped to the sensor contact 
+        df = crop_df(df, center_pct=48, window_size=120) # Cropped to the sensor contact 
     else:
-        df = crop_df(df, center_pct=50, window_size=424) # Cropped approx 50 datapoints off each end. Effectively full signal
+        df = crop_df(df, center_pct=50, window_size=420) # Cropped approx 50 datapoints off each end. Effectively full signal
     
     if calibrated:
         df = df.drop(columns=df.columns[0 : 12])
@@ -54,22 +57,32 @@ def crop_df(df, center_pct, window_size):
     end   = min(center_idx + window_size, n)
     return df.iloc[start:end]
 
-def df_convert_unix_ts(csv_path, timestamp_col='timestamp_us'):
-    df = pd.read_csv(csv_path)
-    df[timestamp_col] = df[timestamp_col].apply(
-        lambda x: (datetime(1970, 1, 1) + timedelta(microseconds=int(x))).isoformat()
-    )
-    return df
+def augment_data(x):
+    # aug_rand = random.random()
+    # if aug_rand <= 0.4:
+    #     x = time_shift(x)
+    x = add_gaussian_noise(x)
+    return x
+
+def time_shift(df, max_shift=2):
+    shift = np.random.randint(-max_shift, max_shift + 1)
+    shifted = df.shift(periods=shift, axis=1)
+    return shifted.fillna(0)
+
+def add_gaussian_noise(df, std=0.01):
+    noise = np.random.randn(*df.shape) * std
+    return df + noise
 
 # ------------------------------------------------------------------------ New Dataset Management 
 
-def collect_file_info(root_dir, tex_classes, mat_classes, singlegrasp_limit=None):
+def collect_file_info(root_dir, tex_classes, mat_classes, singlegrasp_limit=20):
     tex_classes = sorted(tex_classes)
     mat_classes = sorted(mat_classes)
     tex_max     = [0] * len(tex_classes)
     mat_max     = [0] * len(mat_classes)
 
     cls_max     = [0] * len(tex_classes)  * len(mat_classes)
+    counter = 0
 
     dict_list = []
     for dirpath, _, filenames in os.walk(root_dir):
@@ -92,6 +105,8 @@ def collect_file_info(root_dir, tex_classes, mat_classes, singlegrasp_limit=None
                 cls_max[cls_idx] += 1
                 if cls_max[cls_idx] >= singlegrasp_limit:
                     continue
+                else:
+                    counter += 1
 
             mult_bool        = file_contains_str(full_pth, 'multigrasp')
             gripper_idx      = get_file_index(dirpath, fname)
@@ -124,6 +139,7 @@ def collect_file_info(root_dir, tex_classes, mat_classes, singlegrasp_limit=None
                 'grasp_pos'     : multi_grasp_pos
             }
             dict_list.append(data_dict)
+    # print(counter)
     return(dict_list)
 
 def file_contains_str(file_str, search_str):
@@ -156,26 +172,26 @@ def get_file_index(directory_path: str, filename: str) -> int:
     except ValueError:
         raise ValueError(f"File {filename!r} not found in directory (after filtering).")
     
-def compute_dataset_mean_std(dataset, batch_size=32, num_workers=4):
+# ------------------------------------------------------------------------ Dataset Normalisation 
+    
+def compute_dataset_mean_std(dataset, batch_size=20, num_workers=4):
     """Utility to scan the entire dataset and compute per-channel mean & std."""
     loader = DataLoader(dataset, batch_size=batch_size,
                         shuffle=False, num_workers=num_workers,
                         pin_memory=True)
 
     n_channels = None
-    s1 = 0.0  # sum of values
-    s2 = 0.0  # sum of squares
-    n  = 0    # count of total pixels/elements
+    s1 = 0.0  
+    s2 = 0.0  
+    n  = 0    
 
     for x, *_ in loader:
-        # x.shape = (B, C, ...)
         B, C = x.shape[:2]
         if n_channels is None:
             n_channels = C
-        # flatten each sample: (B, C, N1*N2*...)
         x_flat = x.view(B, C, -1)
-        s1 += x_flat.sum(dim=(0,2))         # shape (C,)
-        s2 += (x_flat ** 2).sum(dim=(0,2))  # shape (C,)
+        s1 += x_flat.sum(dim=(0,2))         
+        s2 += (x_flat ** 2).sum(dim=(0,2)) 
         n  += B * x_flat.size(2)
 
     mean = s1 / n
@@ -184,132 +200,31 @@ def compute_dataset_mean_std(dataset, batch_size=32, num_workers=4):
     return mean, std
 
 def zscore_denormalize(x, mean, std):
-    # x: (B, C, L) in z-score space -> original space
     C = x.shape[1]
     mean = mean.view(1, C, 1).to(x.device)
     std  = std.view(1, C, 1).to(x.device)
     return x * std + mean
 
-def convert_gripper_time(gripper_pth):
-    df = pd.read_csv(gripper_pth)
-    df['timestamp_converted'] = df['timestamp_us'].apply(
-        lambda x: (datetime(2025, 1, 1) + timedelta(seconds=x)).isoformat()
-    )
-    return df
-# ------------------------------------------------------------------------ Dataset Formating Functions
-
-def collect_files_old(root_dir, split_str='train', split_distribution=[0.7, 0.2, 0.1]):
-    """
-    Return a list of [full_file_path_s0, full_file_path_s2, subfolder_1, subfolder_2] for every file
-    found two levels down from root_dir.
-    """
-
-    # validate args
-    assert split_str in ('train', 'test', 'val'), \
-        "Split String must be one of: 'train', 'test' or 'val'"
-    assert abs(sum(split_distribution) - 1.0) < 1e-6, \
-        'split_distribution must sum to 1.0'
-
-    entries = []
-    for dirpath, dirnames, filenames in os.walk(root_dir):
-        for fname in filenames:
-            if fname[0] == 'g': # Filtering out gipper data files
-                continue
-            if fname[6] == '0':
-                full_path_s0 = os.path.join(dirpath, fname)
-                fname_s1 = fname[:6] + '1' + fname[7:]
-                full_path_s1 = os.path.join(dirpath, fname_s1)
-                rel_parts = os.path.relpath(full_path_s0, root_dir).split(os.sep)
-                if len(rel_parts) == 3:
-                    sub1, sub2, _ = rel_parts
-                    entries.append([full_path_s0, full_path_s1, sub1, sub2])
-
-    return entries
-
-def collect_files(root_dir, split_str, split_distribution):
-    """
-    Crawl two levels deep under root_dir and collect all pairs of files
-    (s0, s1) along with their sub1 and sub2 labels. Then stratify by
-    (sub1, sub2), sort deterministically within each group, and split into
-    train/test/val according to split_distribution. Finally, return only the
-    list for split_str.
-
-    Returns a list of [full_path_s0, full_path_s1, sub1, sub2].
-    """
-    # validate args
-    assert split_str in ('train', 'test', 'val'), \
-        "Split String must be one of: 'train', 'test' or 'val'"
-    assert abs(sum(split_distribution) - 1.0) < 1e-6, \
-        'split_distribution must sum to 1.0'
-
-    # 1) collect all entries
-    all_entries = []
-    for dirpath, dirnames, filenames in os.walk(root_dir):
-        for fname in filenames:
-            if fname.startswith('g'):  # skip gipper data files
-                continue
-            # only look at files where 7th char == '0'
-            if len(fname) > 6 and fname[6] == '0':
-                full_s0 = os.path.join(dirpath, fname)
-                # build the paired filename
-                fname_s1 = fname[:6] + '1' + fname[7:]
-                full_s1 = os.path.join(dirpath, fname_s1)
-                # get sub1/sub2 from relative path
-                rel = os.path.relpath(full_s0, root_dir).split(os.sep)
-                if len(rel) == 3:
-                    sub1, sub2, _ = rel
-                    all_entries.append([full_s0, full_s1, sub1, sub2])
-
-    # 2) group by (sub1, sub2)
-    groups = defaultdict(list)
-    for entry in all_entries:
-        key = (entry[2], entry[3])
-        groups[key].append(entry)
-
-    # mapping for split index
-    idx_map = {'train': 0, 'test': 1, 'val': 2}
-    out = []
-
-    # 3) for each group, sort deterministically and split
-    for grp_entries in groups.values():
-        # sort by s0 path for reproducibility
-        grp_sorted = sorted(grp_entries, key=lambda x: x[0])
-        n = len(grp_sorted)
-        n_train = int(split_distribution[0] * n)
-        n_test  = int(split_distribution[1] * n)
-
-        train_slice = grp_sorted[:n_train]
-        test_slice  = grp_sorted[n_train:n_train + n_test]
-        val_slice   = grp_sorted[n_train + n_test:]
-
-        splits = {
-            'train': train_slice,
-            'test':  test_slice,
-            'val':   val_slice
-        }
-            
-        out.extend(splits[split_str])
-
-    return out
-
-def num_dir_classes(root_dir):
-    unique_names = set()
-    for _, dirs, _ in os.walk(root_dir):
-        for d in dirs:
-            unique_names.add(d)
-    return len(unique_names)
+# ------------------------------------------------------------------------ Dataset Normalisation 
 
 def dfs_to_tensor_nearest(df1: pd.DataFrame,
                           df2: pd.DataFrame):
 
     left  = df1.reset_index().rename(columns={'t_seconds':'t'}).sort_values('t')
     right = df2.reset_index().rename(columns={'t_seconds':'t'}).sort_values('t')
+
     merged = pd.merge_asof(
         left, right,
         on='t',
         direction='nearest'
     ).dropna()
+    # merged = merged.drop(columns='t')
+    # reshaped = merged.to_numpy().reshape(len(merged), -1, 3)  # shape: (n_samples, n_sensors, 3)
+    # norms = np.linalg.norm(reshaped, axis=2)
+    # print(norms)
+    # return torch.from_numpy(norms.T)
     return torch.from_numpy(merged.drop(columns='t').T.values)
+
 
 def get_class(material, texture):
 
@@ -362,7 +277,7 @@ def first_deriv_filter(raw_df):
     return raw_df.diff().divide(dt, axis=0)
 
 # Butterworth Filter
-def butterworth_filter(signal_df, order=4, cutoff_hz=20.0):
+def butterworth_filter(signal_df, order=4, cutoff_hz=60.0):
     dt = np.median(np.diff(signal_df.index.values))
     fs = 1.0 / dt
     nyq = 0.5 * fs
@@ -405,18 +320,35 @@ def sensor_plotter(signal1_df,
     match plot_mode:
         case 'taxel':
             axes = _make_subplots(4)
+            count = 0
             for ax, sensor in zip(axes, taxel_range):                                           # type: ignore
+                count += 1
                 for dim in data_dim:
                     if calibrated:
                         col = f'{dim}{sensor}_calib'
                     else:
                         col = f'{dim}{sensor}'
-                    ax.plot(signal1_df.index, signal1_df[col], alpha=raw_alpha, lw=1, label=f'{col[:-6]} Raw')
+                    ax.plot(signal1_df.index, signal1_df[col], alpha=raw_alpha, lw=1, label=f'{col[:-6]}')
                     if has_filt:
                         ax.plot(signal2_df.index, signal2_df[col], lw=2, label=f'{col[:-6]} Reconstructed')           # type: ignore
                 ax.set_ylim(y_min, y_max)
                 ax.set_ylabel('Cilia Deformation')
                 ax.set_title(f'Taxel {sensor}')
+                vline_pts = [1.25, 2.2, 3.1, 4.05]
+                ax.vlines(vline_pts, -500, 500, color=['r', 'r', 'r', 'r'], linestyles='dashed')
+                if count == 4:
+                    ymin, ymax = ax.get_ylim()
+                    pts_lst = [0.5, 1.7, 2.67, 3.55, 4.5]
+                    for i in range(len(pts_lst)):
+                        ax.text(
+                            pts_lst[i],                # x position
+                            ax.get_ylim()[0],     # ymin - 0.15*(ymax - ymin),    # y position (bottom of y-axis)
+                            f'Gripper Pos {i+1}',          # text
+                            color='r',
+                            ha='center',         # horizontal alignment
+                            va='top',            # vertical alignment (just above x-axis)
+                            backgroundcolor='w'  # optional: white background
+                        )
                 ax.legend(loc='upper right', fontsize='small')
             axes[-1].set_xlabel('Time (s)')                                                     # type: ignore
             plt.tight_layout()
@@ -433,7 +365,7 @@ def sensor_plotter(signal1_df,
                         col = f'{dim}{sensor}_calib'
                     else:
                         col = f'{dim}{sensor}'
-                    ax.plot(signal1_df.index, signal1_df[col], alpha=raw_alpha, lw=1, label=f'{col[:-6]} Raw')
+                    ax.plot(signal1_df.index, signal1_df[col], alpha=raw_alpha, lw=1, label=f'{col[:-6]}')
                     if has_filt:
                         ax.plot(signal2_df.index, signal2_df[col], lw=2, label=f'{col[:-6]} Reconstructed')             # type: ignore
                 ax.set_ylim(y_min, y_max)
@@ -449,171 +381,6 @@ def sensor_plotter(signal1_df,
 
         case _:
             raise ValueError("Choose plot_mode='taxel' or 'xyz'")
-        
-def run_plotter():
-    pth         = 'data/ds20/bigberry/sensor0_data_20250722_161000.csv'
-    calibrated  = True
-    df          = data_loader(pth, cropping=False, filtering=False, calibrated=calibrated)
-    # filt_df     = data_loader(pth, cropping=False, filtering=True, calibrated=calibrated)
-    sensor_plotter(df, calibrated=calibrated)
-
-def confusion_plotter(cm, file_name, plotting=False, normalize='true'):
-    # Class labels
-    class_names = [
-        "ds20 bigberry", "ds20 citrus", "ds20 rough", "ds20 smallberry", "ds20 smooth", "ds20 strawberry",
-        "ds30 bigberry", "ds30 citrus", "ds30 rough", "ds30 smallberry", "ds30 smooth", "ds30 strawberry",
-        "ef10 bigberry", "ef10 citrus", "ef10 rough", "ef10 smallberry", "ef10 smooth", "ef10 strawberry",
-        "ef30 bigberry", "ef30 citrus", "ef30 rough", "ef30 smallberry", "ef30 smooth", "ef30 strawberry",
-        "ef50 bigberry", "ef50 citrus", "ef50 rough", "ef50 smallberry", "ef50 smooth", "ef50 strawberry"
-    ]
-
-    # Compute percentages
-    if normalize == 'true':
-        # Normalize per true label (row-wise)
-        sums = cm.sum(axis=1, keepdims=True)
-        # Avoid division by zero
-        sums[sums == 0] = 1
-        cm_percent = (cm.astype(float) / sums) * 100
-    elif normalize == 'all':
-        # Normalize over entire matrix
-        total = cm.sum()
-        cm_percent = (cm.astype(float) / total) * 100
-    else:
-        # No normalization, treat values as-is
-        cm_percent = cm.astype(float)
-
-    # Mask zeros for display
-    cm_masked = np.ma.masked_where(cm_percent == 0, cm_percent)
-    cmap = plt.cm.viridis.copy()                        # type: ignore
-    cmap.set_bad(color='white')
-
-    # Plot
-    fig, ax = plt.subplots(figsize=(12, 12))
-    cax = ax.matshow(cm_masked, cmap=cmap)
-    cbar = fig.colorbar(cax)
-    cbar.ax.set_ylabel('Percentage', rotation=270, labelpad=15)
-    # Format colorbar ticks as percentages
-    cbar.ax.yaxis.set_major_formatter(lambda x, pos: f'{x:.0f}%')
-
-    # Add white dotted gridlines separating each cell
-    n = cm.shape[0]
-    ax.set_xticks(np.arange(-0.5, n, 1), minor=True)
-    ax.set_yticks(np.arange(-0.5, n, 1), minor=True)
-    ax.grid(which='minor', color='black', linestyle=':', linewidth=0.5)
-    ax.tick_params(which='minor', bottom=False, left=False)
-
-    # Axis labels
-    ax.set_xticks(range(n))
-    ax.set_xticklabels(class_names, rotation=90, fontsize=6)
-    ax.set_yticks(range(n))
-    ax.set_yticklabels(class_names, fontsize=6)
-    ax.xaxis.set_label_position('top')
-    ax.xaxis.tick_top()
-    ax.set_xlabel('Predicted label', labelpad=10)
-    ax.set_ylabel('True label')
-
-    # Annotate each cell with percentage
-    # Use contrasting text color based on background intensity
-    # max_val = cm_percent.max()
-    for i in range(n):
-        for j in range(n):
-            val = cm_percent[i, j]
-            if cm[i, j] != 0:
-                # text_color = 'white' if val > max_val / 2 else 'black'
-                text_color = 'black'
-                # val = int(val)
-                ax.text(j, i, f'{val}', ha='center', va='center', color=text_color, fontsize=4)
-
-    plt.tight_layout()
-    if plotting:
-        plt.show()
-    plt.savefig(file_name, dpi=300)
-
-def confusion_plotter_dual(mat_cm, tex_cm,
-                           mat_file_name, tex_file_name,
-                           plotting=False, normalize='true'):
-    """
-    Plot and save two confusion‐matrix heatmaps: one for material (6×6),
-    one for texture (6×6).
-
-    Args:
-        mat_cm (ndarray):    material confusion matrix (shape [6,6])
-        tex_cm (ndarray):    texture confusion matrix (shape [6,6])
-        mat_file_name (str): where to save the material plot
-        tex_file_name (str): where to save the texture plot
-        plotting (bool):     whether to plt.show() each
-        normalize (str):     'true' (row‐wise), 'all', or anything else (counts)
-    """
-    material_list = sorted(['ds20', 'ds30', 'ef10', 'ef30', 'ef50'])        # <------------------------- add back , 'rigid'
-    texture_list  = sorted(['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry'])
-
-    # texture_list, material_list = get_cls_lists('data')
-
-    def _plot_cm(cm, classes, file_name):
-        print(cm)
-        print(classes)
-        # Normalize
-        if normalize.lower() == 'true':
-            row_sums = cm.sum(axis=1, keepdims=True)
-            row_sums[row_sums == 0] = 1
-            cm_pct = (cm.astype(float) / row_sums) * 100
-        elif normalize.lower() == 'all':
-            total = cm.sum() or 1
-            cm_pct = (cm.astype(float) / total) * 100
-        else:
-            cm_pct = cm.astype(float)
-
-        # Mask zeros
-        cm_mask = np.ma.masked_where(cm_pct == 0, cm_pct)
-        # cmap = plt.cm.viridis.copy() # type: ignore
-        cmap = plt.cm.Blues.copy() # type: ignore                    
-        cmap.set_bad(color='white')
-
-        fig, ax = plt.subplots(figsize=(8, 8))
-        cax = ax.matshow(cm_mask, cmap=cmap, vmin=0, vmax=100)
-        cbar = fig.colorbar(cax)
-        cbar.ax.set_ylabel('Percentage', rotation=270, labelpad=15)
-        cbar.ax.yaxis.set_major_formatter(lambda x, pos: f'{x:.0f}%')
-
-        n = len(classes)
-        # gridlines
-        ax.set_xticks(np.arange(-0.5, n, 1), minor=True)
-        ax.set_yticks(np.arange(-0.5, n, 1), minor=True)
-        ax.grid(which='minor', color='black', linestyle=':', linewidth=0.5)
-        ax.tick_params(which='minor', bottom=False, left=False)
-
-        # axis labels
-        ax.set_xticks(range(n))
-        ax.set_xticklabels(classes, rotation=90, fontsize=8)
-        ax.set_yticks(range(n))
-        ax.set_yticklabels(classes, fontsize=8)
-        ax.xaxis.set_label_position('top')
-        ax.xaxis.tick_top()
-        ax.set_xlabel('Predicted label', labelpad=10)
-        ax.set_ylabel('True label')
-
-        # annotate
-        for i in range(n):
-            for j in range(n):
-                if cm[i, j] != 0:
-                    val = round(cm_pct[i, j], 1)
-                    if str(val)[-1] == '0':
-                        val = int(val)
-                    if val <= 50:
-                        ax.text(j, i, f'{val}', ha='center', va='center', color='black', fontsize=10)
-                    else:
-                        ax.text(j, i, f'{val}', ha='center', va='center', color='white', fontsize=10)
-
-        plt.tight_layout()
-        if plotting:
-            plt.show()
-        plt.savefig(file_name, dpi=300)
-        plt.close(fig)
-
-    # Plot material (5 classes)
-    _plot_cm(mat_cm, material_list, mat_file_name)
-    # Plot texture (6 classes)
-    _plot_cm(tex_cm,  texture_list,  tex_file_name)
 
 def plot_confusion_matrix(cm, classes, file_name, plotting=False, normalize='true'):
     print(cm)
@@ -662,18 +429,19 @@ def plot_confusion_matrix(cm, classes, file_name, plotting=False, normalize='tru
     for i in range(n):
         for j in range(n):
             if cm[i, j] != 0:
-                val = round(cm_pct[i, j], 1)
+                val = round(cm_pct[i, j])
                 if str(val)[-1] == '0':
                     val = int(val)
-                if val <= 50:
-                    ax.text(j, i, f'{val}', ha='center', va='center', color='black', fontsize=10)
-                else:
-                    ax.text(j, i, f'{val}', ha='center', va='center', color='white', fontsize=10)
+                ax.text(j, i, f'{val}', ha='center', va='center', color='black', fontsize=7)
+                # if val <= 50:
+                #     ax.text(j, i, f'{val}', ha='center', va='center', color='black', fontsize=10)
+                # else:
+                #     ax.text(j, i, f'{val}', ha='center', va='center', color='white', fontsize=10)
 
     plt.tight_layout()
     if plotting:
         plt.show()
-    plt.savefig(file_name, dpi=300)
+    plt.savefig(file_name, dpi=400)
     plt.close(fig)
 
 def loss_plots(save_pth,
@@ -832,14 +600,6 @@ def split_dataset(
         raise ValueError('Split must be either: test/train/val')
 
 if __name__ == '__main__':
-    file_pth = r'data_final/multigrasp_test/ds20_multigrasp/bigberry_ds20/bigberry_ds20h1/sensor0_data_20250805_182121.csv'
-
-    signal_df  = data_loader(file_pth, False, True)
-    cropped_df = data_loader(file_pth, True, True)
-
-    sensor_plotter(signal_df, cropped_df)
-
-    # root_dir = 'data'
-    # mat_classes    = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']
-    # tex_classes    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
-    # collect_file_info(root_dir, mat_classes, tex_classes)
+    filepath = r'data_final/multigrasp_train/ef30_multigrasp/smallberry_ef30/smallberry_ef30m/sensor1_data_20250730_155016.csv'
+    signal_df  = data_loader(filepath, True, True, calibrated=True)
+    sensor_plotter(signal_df, calibrated=True)
