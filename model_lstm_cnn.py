@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 
-class LSTM_CNN(nn.Module):
+class Model(nn.Module):
     def __init__(
         self,
         input_channels=24,
-        mat_classes=6,
+        mat_classes=5,
         tex_classes=6
     ):
         super().__init__()
@@ -33,32 +33,28 @@ class LSTM_CNN(nn.Module):
 
         # -------------------- Encoder --------------------
         self.encoder = nn.Sequential(
-        nn.Conv1d(lstm_feat, 256, kernel_size=5, stride=2, padding=2), 
-        nn.BatchNorm1d(256),
-        nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv1d(lstm_feat, 32, kernel_size=5, padding=2),
+            nn.BatchNorm1d(32),
+            nn.MaxPool1d(2),  # L -> L/2
 
-        nn.Conv1d(256, 384, kernel_size=5, stride=2, padding=2), 
-        nn.BatchNorm1d(384),
-        nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv1d(32, 64, kernel_size=5, padding=2),
+            nn.BatchNorm1d(64),
+            nn.MaxPool1d(2),  # L/2 -> L/4
 
-        nn.Conv1d(384, 512, kernel_size=3, stride=2, padding=1), 
-        nn.BatchNorm1d(512),
-        nn.LeakyReLU(0.2, inplace=True),
-
-        nn.Conv1d(512, 512, kernel_size=3, stride=2, padding=1), 
-        nn.BatchNorm1d(512),
-        nn.LeakyReLU(0.2, inplace=True)
+            nn.Conv1d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm1d(128),
+            nn.MaxPool1d(2)  # L/4 -> L/8
         )
 
         # -------------------- Classification Heads --------------------
         self.mat_head = nn.Sequential(
-            nn.Linear(512, 128),
+            nn.Linear(128, 128),
             nn.ReLU(),
             nn.Dropout(0.3),
             nn.Linear(128, mat_classes)
         )
         self.tex_head = nn.Sequential(
-            nn.Linear(512, 128),
+            nn.Linear(128, 128),
             nn.ReLU(),
             nn.Dropout(0.3),
             nn.Linear(128, tex_classes)
@@ -76,7 +72,7 @@ class LSTM_CNN(nn.Module):
 
 if __name__ == '__main__':
 
-    model = LSTM_CNN()
+    model = Model()
     in_sample = torch.rand([20, 240, 24])
     mat_out, tex_out = model(in_sample)
     print(mat_out.shape)

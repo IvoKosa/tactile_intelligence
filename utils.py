@@ -1,9 +1,10 @@
-import os, re, torch, random
+import os, re, torch, random, sys
 from torch.utils.data import DataLoader
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from datetime import datetime, timedelta
+from matplotlib.ticker import FuncFormatter
 from pathlib import Path
 import matplotlib.pyplot as plt
 from scipy.signal import butter, filtfilt
@@ -12,27 +13,35 @@ from typing import List, Dict
 # ------------------------------------------------------------------------ Loading Functions
 
 # Load Data from Single CSV path
-def data_loader(csv_path, cropping, filtering, calibrated=True, augment=True):
+def data_loader(csv_path, cropping, filtering, calibrated=True, augment=True, euc_norm=True):
     df = pd.read_csv(csv_path) 
     df.set_index('timestamp', inplace=True)
     df = normalise_df_time(df)
 
-    aug_rand = random.random()
-    if augment and aug_rand <= 0.4:
-        df = augment_data(df)
+    # aug_rand = random.random()
+    # if augment and aug_rand <= 0.4:
+    #     df = augment_data(df)
 
     if filtering:
         df = butterworth_filter(df)
 
     if cropping:
-        df = crop_df(df, center_pct=48, window_size=120) # Cropped to the sensor contact 
+        df = new_crop(df, centre_sec=2.7, window_size=120) # Cropped to the sensor contact 
     else:
-        df = crop_df(df, center_pct=50, window_size=420) # Cropped approx 50 datapoints off each end. Effectively full signal
+        df = new_crop(df, centre_sec=2.7, window_size=420) # Cropped approx 50 datapoints off each end. Effectively full signal
+
+    # if cropping:
+    #     df = crop_df(df, center_pct=48, window_size=120) # Cropped to the sensor contact 
+    # else:
+    #     df = crop_df(df, center_pct=50, window_size=420) # Cropped approx 50 datapoints off each end. Effectively full signal
     
     if calibrated:
         df = df.drop(columns=df.columns[0 : 12])
     else:
         df = df.drop(columns=df.columns[12 : ])
+
+    if euc_norm:
+        df = collapse_xyz_to_norm(df)
 
     return df
 
@@ -57,6 +66,13 @@ def crop_df(df, center_pct, window_size):
     end   = min(center_idx + window_size, n)
     return df.iloc[start:end]
 
+def new_crop(df, centre_sec, window_size):
+    idx_vals = df.index.to_numpy()
+    pos = int(np.argmin(np.abs(idx_vals - centre_sec)))
+    start = max(pos - window_size, 0)
+    end   = min(pos + window_size, len(df))
+    return df.iloc[start:end]
+
 def augment_data(x):
     # aug_rand = random.random()
     # if aug_rand <= 0.4:
@@ -72,6 +88,19 @@ def time_shift(df, max_shift=2):
 def add_gaussian_noise(df, std=0.01):
     noise = np.random.randn(*df.shape) * std
     return df + noise
+
+def collapse_xyz_to_norm(df):
+    if df.shape[1] % 3 != 0:
+        raise ValueError("Number of columns must be divisible by 3 (x,y,z groups).")
+    
+    n_groups = df.shape[1] // 3
+    normed_data = {}
+    
+    for i in range(n_groups):
+        cols = df.iloc[:, 3*i : 3*i + 3]
+        normed_data[f'norm_{i}'] = np.linalg.norm(cols.values, axis=1)
+    
+    return pd.DataFrame(normed_data, index=df.index)
 
 # ------------------------------------------------------------------------ New Dataset Management 
 
@@ -103,7 +132,7 @@ def collect_file_info(root_dir, tex_classes, mat_classes, singlegrasp_limit=20):
             if file_contains_str(dirpath, '200') and singlegrasp_limit is not None:
                 cls_idx = mat_idx * len(tex_classes) + tex_idx
                 cls_max[cls_idx] += 1
-                if cls_max[cls_idx] >= singlegrasp_limit:
+                if cls_max[cls_idx] > singlegrasp_limit:
                     continue
                 else:
                     counter += 1
@@ -119,7 +148,6 @@ def collect_file_info(root_dir, tex_classes, mat_classes, singlegrasp_limit=20):
                         pos = char
                         break
                 if pos == None:
-                    # raise KeyError('Grasp Pos Unknown')
                     pos = None
                 if pos == '1' or pos == '2':
                     pos = 'h' + pos
@@ -277,7 +305,7 @@ def first_deriv_filter(raw_df):
     return raw_df.diff().divide(dt, axis=0)
 
 # Butterworth Filter
-def butterworth_filter(signal_df, order=4, cutoff_hz=60.0):
+def butterworth_filter(signal_df, order=4, cutoff_hz=50.0):
     dt = np.median(np.diff(signal_df.index.values))
     fs = 1.0 / dt
     nyq = 0.5 * fs
@@ -319,41 +347,77 @@ def sensor_plotter(signal1_df,
 
     match plot_mode:
         case 'taxel':
-            axes = _make_subplots(4)
-            count = 0
-            for ax, sensor in zip(axes, taxel_range):                                           # type: ignore
-                count += 1
+            # axes = _make_subplots(4)
+            # count = 0
+            # for ax, sensor in zip(axes, taxel_range):                                           # type: ignore
+            #     count += 1
+            #     for dim in data_dim:
+            #         if calibrated:
+            #             col = f'{dim}{sensor}_calib'
+            #         else:
+            #             col = f'{dim}{sensor}'
+            #         ax.plot(signal1_df.index, signal1_df[col], alpha=raw_alpha, lw=1, label=f'{col[:-6]}')
+            #         if has_filt:
+            #             ax.plot(signal2_df.index, signal2_df[col], lw=2, label=f'{col[:-6]} Reconstructed')           # type: ignore
+            #     ax.set_ylim(y_min, y_max)
+            #     ax.set_ylabel('Cilia Deformation')
+            #     ax.set_title(f'Taxel {sensor}')
+            #     # vline_pts = [1.25, 2.2, 3.1, 4.05]
+            #     # ax.vlines(vline_pts, -500, 500, color=['r', 'r', 'r', 'r'], linestyles='dashed')
+            #     # if count == 4:
+            #     #     ymin, ymax = ax.get_ylim()
+            #     #     pts_lst = [0.5, 1.7, 2.67, 3.55, 4.5]
+            #     #     for i in range(len(pts_lst)):
+            #     #         ax.text(
+            #     #             pts_lst[i],                # x position
+            #     #             ax.get_ylim()[0],     # ymin - 0.15*(ymax - ymin),    # y position (bottom of y-axis)
+            #     #             f'Gripper Pos {i+1}',          # text
+            #     #             color='r',
+            #     #             ha='center',         # horizontal alignment
+            #     #             va='top',            # vertical alignment (just above x-axis)
+            #     #             backgroundcolor='w'  # optional: white background
+            #     #         )
+            #     ax.legend(loc='upper right', fontsize='small')
+            # axes[-1].set_xlabel('Time (s)')                                                     # type: ignore
+            # plt.tight_layout()
+            # if save_pth is not None:
+            #     plt.savefig(save_pth)
+            # else:
+            #     plt.show()
+                # --- changed helper: return 2x2 axes, flattened ---
+            def _make_subplots_2x2():
+                fig, axes = plt.subplots(nrows=2, ncols=2, sharex=True, figsize=(20, 8))
+                return fig, axes.ravel()
+            
+            def shift_xaxis(x, pos):
+                return f"{x + 315:.0f}" 
+
+            taxel_range, data_dim = range(1, 5), ['x', 'y', 'z']
+            raw_alpha = signal2_alpha if has_filt else 1.0
+
+            # --- main plotting: now uses 2x2 grid ---
+            fig, axes = _make_subplots_2x2()
+            for ax, sensor in zip(axes, taxel_range):
                 for dim in data_dim:
-                    if calibrated:
-                        col = f'{dim}{sensor}_calib'
-                    else:
-                        col = f'{dim}{sensor}'
+                    col = f'{dim}{sensor}_calib' if calibrated else f'{dim}{sensor}'
                     ax.plot(signal1_df.index, signal1_df[col], alpha=raw_alpha, lw=1, label=f'{col[:-6]}')
                     if has_filt:
-                        ax.plot(signal2_df.index, signal2_df[col], lw=2, label=f'{col[:-6]} Reconstructed')           # type: ignore
+                        ax.plot(signal2_df.index, signal2_df[col], lw=2, label=f'{col[:-6]} Reconstructed') # type: ignore
                 ax.set_ylim(y_min, y_max)
                 ax.set_ylabel('Cilia Deformation')
                 ax.set_title(f'Taxel {sensor}')
-                vline_pts = [1.25, 2.2, 3.1, 4.05]
-                ax.vlines(vline_pts, -500, 500, color=['r', 'r', 'r', 'r'], linestyles='dashed')
-                if count == 4:
-                    ymin, ymax = ax.get_ylim()
-                    pts_lst = [0.5, 1.7, 2.67, 3.55, 4.5]
-                    for i in range(len(pts_lst)):
-                        ax.text(
-                            pts_lst[i],                # x position
-                            ax.get_ylim()[0],     # ymin - 0.15*(ymax - ymin),    # y position (bottom of y-axis)
-                            f'Gripper Pos {i+1}',          # text
-                            color='r',
-                            ha='center',         # horizontal alignment
-                            va='top',            # vertical alignment (just above x-axis)
-                            backgroundcolor='w'  # optional: white background
-                        )
                 ax.legend(loc='upper right', fontsize='small')
-            axes[-1].set_xlabel('Time (s)')                                                     # type: ignore
+
+            # Label x-axis only on the bottom row (axes[2] and axes[3])
+            axes[2].set_xlabel('Time steps')
+            # axes[2].set_xlim([315, 555])
+            axes[2].xaxis.set_major_formatter(FuncFormatter(shift_xaxis))
+            axes[3].set_xlabel('Time steps')
+
             plt.tight_layout()
             if save_pth is not None:
                 plt.savefig(save_pth)
+                plt.close(fig)
             else:
                 plt.show()
 
@@ -600,6 +664,8 @@ def split_dataset(
         raise ValueError('Split must be either: test/train/val')
 
 if __name__ == '__main__':
-    filepath = r'data_final/multigrasp_train/ef30_multigrasp/smallberry_ef30/smallberry_ef30m/sensor1_data_20250730_155016.csv'
-    signal_df  = data_loader(filepath, True, True, calibrated=True)
-    sensor_plotter(signal_df, calibrated=True)
+    filepath    = r'data_final/multigrasp_train/ef30_multigrasp/smallberry_ef30/smallberry_ef30m/sensor1_data_20250730_155016.csv'
+    signal_df   = data_loader(filepath, cropping=False, filtering=False, calibrated=True)
+    cropped_df  = data_loader(filepath, cropping=False, filtering=True, calibrated=True)
+    print(signal_df.head())
+    sensor_plotter(signal_df, cropped_df, calibrated=True)
