@@ -485,7 +485,7 @@ if __name__ == '__main__':
     # model = model_LSTM.Model()
 
     manager = Manager(model, file_pth=f'EXPERIMENTS/CNN/run1', 
-                    num_epochs=20, batch_size=32, shuffle=True,
+                    num_epochs=1, batch_size=32, shuffle=True,
                     tex_classes=tex_classes,
                     mat_classes=mat_classes,
                     multigrasp=None,
