@@ -15,7 +15,7 @@ bio-inspired magnetic sensor, providing a challenging benchmark for multi-task t
 ## Installation
 Install dependecies, ensure that pytorch is properly installed 
 ```bash
-git clone <[https://github.com/IvoKosa/tactile_intelligence/tree/main](https://github.com/IvoKosa/tactile_intelligence)>
+git clone <https://github.com/IvoKosa/tactile_intelligence>
 cd <tactile_intelligence>
 pip install -r requirements.txt
 ```
