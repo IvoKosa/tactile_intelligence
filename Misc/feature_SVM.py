@@ -10,11 +10,27 @@ from sklearn.metrics import (
     confusion_matrix, classification_report
 )
 
-# ---------- helpers ----------
 def _to_numpy(x):
     if torch is not None and isinstance(x, torch.Tensor):
         return x.detach().cpu().numpy()
     return np.asarray(x)
+
+def _flatten_signal(signal_np: np.ndarray) -> np.ndarray:
+    """
+    Flatten a (C, L) or (L, C) signal into a vector:
+    [t1c1, t1c2, ... t1cC, t2c1, t2c2, ... t2cC, ..., tLc1, ... tLcC].
+    """
+ 
+    if signal_np.ndim == 1:
+        return signal_np.ravel()
+    if signal_np.shape[0] == 24:  
+        signal_np = signal_np.T  
+    elif signal_np.shape[1] == 24:
+        pass   
+    else:
+        raise ValueError(f"Unexpected signal shape {signal_np.shape}, expected 24 channels")
+
+    return signal_np.reshape(-1)  # flatten row-wise
 
 def _stats_features(signal_np: np.ndarray) -> np.ndarray:
     """

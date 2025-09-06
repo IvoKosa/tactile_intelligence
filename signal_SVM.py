@@ -1,4 +1,3 @@
-# svm_multiclass_flattened.py
 import numpy as np
 import torch
 import signal_dataset
@@ -15,6 +14,24 @@ def _to_numpy(x):
     if torch is not None and isinstance(x, torch.Tensor):
         return x.detach().cpu().numpy()
     return np.asarray(x)
+
+def _stats_features(signal_np: np.ndarray) -> np.ndarray:
+    """
+    Per-channel stats: mean, std, min, max, median, p25, p75  -> 7 features/channel.
+    Handles (C, L), (L, C), or (L,) signals.
+    """
+    if signal_np.ndim == 1:
+        x = signal_np[None, :]  # (1, L)
+    else:
+        x = signal_np if signal_np.shape[0] <= 64 else signal_np.T  # (C, L) heuristic
+    feats = []
+    for ch in range(x.shape[0]):
+        v = x[ch]
+        feats.extend([
+            float(np.mean(v)), float(np.std(v)), float(np.min(v)), float(np.max(v)),
+            float(np.median(v)), float(np.percentile(v, 25)), float(np.percentile(v, 75)),
+        ])
+    return np.array(feats, dtype=np.float64)
 
 def _flatten_signal(signal_np: np.ndarray) -> np.ndarray:
     """
@@ -44,7 +61,7 @@ def _coerce_single_label(y):
         return y_np.item()
     return y_np
 
-def dataset_to_xy_combined(dataset):
+def dataset_to_xy_combined(dataset, use_features):
     """
     Build X and combined labels from (signal, mat_target, tex_target).
     Flatten each signal to (L*24,) vector.
@@ -53,13 +70,15 @@ def dataset_to_xy_combined(dataset):
     X, labels = [], []
     for i in range(len(dataset)):
         signal, mat_target, tex_target = dataset[i]
-        feats = _flatten_signal(_to_numpy(signal))
+
+        if use_features:
+            feats = _stats_features(_to_numpy(signal))
+        else:
+            feats = _flatten_signal(_to_numpy(signal))
         X.append(feats)
 
         m = _coerce_single_label(mat_target)
         t = _coerce_single_label(tex_target)
-        # labels.append(f"mat={m}")
-        # labels.append(f"tex={t}")
         labels.append(f"mat={m}|tex={t}")
 
     X = np.vstack(X)
@@ -68,9 +87,9 @@ def dataset_to_xy_combined(dataset):
     return X, y, list(le.classes_)
 
 # ---------- main routine ----------
-def run_svm_combined(train_set, test_set, C=1.0, gamma="scale"):
-    X_tr, y_tr, class_names = dataset_to_xy_combined(train_set)
-    X_te, y_te, _ = dataset_to_xy_combined(test_set)
+def run_svm_combined(train_set, test_set, use_features=False, C=1.0, gamma="scale"):
+    X_tr, y_tr, class_names = dataset_to_xy_combined(train_set, use_features)
+    X_te, y_te, _ = dataset_to_xy_combined(test_set, use_features)
 
     clf = Pipeline([
         ("scaler", StandardScaler(with_mean=True, with_std=True)),
@@ -101,7 +120,11 @@ def run_svm_combined(train_set, test_set, C=1.0, gamma="scale"):
 
     return clf, class_names
 
-# ---------- usage ----------
+# ******************************************* SVM Tester *******************************************
+# 
+# > Used for SVM results
+# > Speficy dataset distribution and if using features flattening signal
+
 if __name__ == "__main__":
 
     seed = 935248
@@ -110,14 +133,19 @@ if __name__ == "__main__":
     torch.cuda.manual_seed_all(seed)
     g = torch.Generator().manual_seed(seed)
 
+    use_features = False
+    out_of_distribution = False
+
     mat_classes = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50']
     tex_classes = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
-    # train_set = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=None, filtering=True, cropping=True, normalise=False, augment=True, tex_classes=tex_classes, mat_classes=mat_classes)
-    # test_set = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=None, filtering=True, cropping=True, normalise=False, augment=True, tex_classes=tex_classes, mat_classes=mat_classes)
-    # train_set, val_set = torch.utils.data.random_split(train_set, [0.7, 0.3], generator=g)    
 
-    full_dataset = signal_dataset.SignalDataset('data_final', multigrasp=None, filtering=True, cropping=True, normalise=False, augment=False, tex_classes=tex_classes, mat_classes=mat_classes)
-    train_set, test_set, val_set        = torch.utils.data.random_split(full_dataset, [2520, 1500, 1080], generator=g)
+    if out_of_distribution:
+        train_set = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=None, filtering=True, cropping=True, normalise=False, augment=True, tex_classes=tex_classes, mat_classes=mat_classes)
+        test_set = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=None, filtering=True, cropping=True, normalise=False, augment=True, tex_classes=tex_classes, mat_classes=mat_classes)
+        train_set, val_set = torch.utils.data.random_split(train_set, [0.7, 0.3], generator=g)    
+    else:
+        full_dataset = signal_dataset.SignalDataset('data_final', multigrasp=None, filtering=True, cropping=True, normalise=False, augment=False, tex_classes=tex_classes, mat_classes=mat_classes)
+        train_set, test_set, val_set        = torch.utils.data.random_split(full_dataset, [2520, 1500, 1080], generator=g)
 
-    _ = run_svm_combined(train_set, test_set, C=1.0, gamma="scale")
+    _ = run_svm_combined(train_set, test_set, use_features, C=1.0, gamma="scale")
 

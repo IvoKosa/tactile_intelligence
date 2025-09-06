@@ -12,31 +12,57 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from captum.attr import Saliency, IntegratedGradients, Occlusion
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
-# seed = 935248
-# random.seed(seed); np.random.seed(seed); torch.manual_seed(seed); torch.cuda.manual_seed_all(seed)
-# torch.backends.cudnn.deterministic = True
-# torch.backends.cudnn.benchmark = False
-# torch.use_deterministic_algorithms(True, warn_only=True)
-
+# Setting fixed seeds for more equal model comparison
 seed = 935248
 random.seed(seed)
 np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
-# Generator
 g = torch.Generator().manual_seed(seed)
+
+# ******************************************* Manager Class *******************************************
+# 
+# > Responsible for all aspects of training/ testing and managing a model
+# > Automatically generates new folders, as well as figures and reports
+# 
+#   Parameters:
+#       > model: Pytorch model architecture
+#       > file_pth: folder for saving model weights and train/test figures
+#       > num_epochs, batch_size, shuffle, lr, weight_decay: standard machine learning hyperparameters
+#
+#       > multigrasp : filters datasets for specific gripper positions 
+#           > none: uses full dataset
+#           > True/ False: uses multi-grasp positions or single_grasp only 
+#           > 'h1'/'h2'/'l'/'m'/'r': gets specific gripper position (high 1, high 2, left, middle, right)
+#
+#       > tex_weight            [float]     : weight factor multiplied with texture loss        (default 1.0)
+#       > mat_weight            [float]     : weight factor multiplied with material loss       (default 1.0)
+#       > reconstruct_weight    [float]     : weight factor multiplied with reconstruction loss (default 1.0)
+#       > early_stopping        [int/ None] : specifies after how many epochs without val loss improvement before training stops early
+#       > reconstruct           [bool]      : specifies if the reconstruction training program should run
+#       > freeze_epoch          [int]       : number op epochs after which CAE decoder will be frozen
+#       > tex_classes           [str-list]  : list of all texture classes the model will train and test with
+#       > mat_classes           [str-list]  : list of all material classes the model will train and test with
+#       > filtering             [bool]      : will apply butterworth filter to all signals
+#       > cropping              [bool]      : specifies if heavy signal cropping will be employed (cropping window can be changed in utils)
+#       > normalise             [bool]      : normalises dataset
+#       > augment               [bool]      : will augment dataset during training loop
+#       > data_partition:
+#           > True: Training on In-Distribution, tesing on Out-of-distribution (Out-of-distribution Results)
+#           > False: Training and testing on combined dataset (In-Distribution Results)
+#
 
 class Manager():
     def __init__(self, model, file_pth='experiments/misc',
-                 num_epochs=25, batch_size=15, shuffle=True, lr=0.001, weight_decay=0.01, multigrasp=None,
-                 distribution=[0.7, 0.2, 0.1], tex_weight=1.0, mat_weight=1.0, reconstruct_weight=1.0, early_stopping=None, reconstruct=True, 
+                 num_epochs=20, batch_size=15, shuffle=True, lr=0.001, weight_decay=0.01, multigrasp=None,
+                 tex_weight=1.0, mat_weight=1.0, reconstruct_weight=1.0, early_stopping=None, 
+                 reconstruct=True, freeze_epoch=5,
                  tex_classes=['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry'],
                  mat_classes=['ds20', 'ds30', 'ef10', 'ef30', 'ef50'],
-                 filtering=False, cropping=False, normalise=False, augment=False, data_partition=True):
+                 filtering=False, cropping=True, normalise=False, augment=False, data_partition=True):
 
         # Hyperparams
         self.num_epochs                 = num_epochs
@@ -45,7 +71,6 @@ class Manager():
         self.learning_rate              = lr
         self.weight_decay               = weight_decay
         self.file_pth                   = file_pth
-        self.distribution               = distribution
         self.tex_weight                 = tex_weight
         self.mat_weight                 = mat_weight
         self.reconstruct_weight         = reconstruct_weight
@@ -56,58 +81,54 @@ class Manager():
         self.augment                    = augment
         self.reconstruct                = reconstruct
         self.data_partition             = data_partition
-        self.freeze_epoch               = 5
+        self.freeze_epoch               = freeze_epoch
 
         # Class Data
         self.tex_classes                = sorted(tex_classes)
         self.mat_classes                = sorted(mat_classes)
 
-        # Dataset and Model
-        self.device                     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Loss Functions
         self.mat_loss                   = nn.CrossEntropyLoss()
         self.tex_loss                   = nn.CrossEntropyLoss()
-
-        # self.model                      = model_AE_same_struct.Model().to(self.device)
-        self.model                      = model.to(self.device)
-        self.optim                      = optim.Adam(self.model.parameters(), lr=lr, weight_decay=weight_decay)
-
         if reconstruct:
             self.AE_loss                = nn.MSELoss()
 
-        # if data_partition:
-        #     train_set              = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=False, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
-        #     test_set               = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=False, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
+        # Model and Optimiser
+        self.device                     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model                      = model.to(self.device)
+        self.optim                      = optim.Adam(self.model.parameters(), lr=lr, weight_decay=weight_decay)
 
-        #     if normalise:
-        #         self.train_mean, self.train_std = utils.compute_dataset_mean_std(train_set, batch_size=self.batch_size)
-        #         train_set           = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=False, mean=self.train_mean, std=self.train_std, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
+        # Dataset Management
+        if data_partition:
+            train_set              = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=False, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
+            test_set               = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=False, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
+
+            if normalise:
+                self.train_mean, self.train_std = utils.compute_dataset_mean_std(train_set, batch_size=self.batch_size)
+                train_set           = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=False, mean=self.train_mean, std=self.train_std, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
                 
-        #         # self.test_mean, self.test_std = utils.compute_dataset_mean_std(test_set, batch_size=self.batch_size)
-        #         test_set           = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=False, mean=self.train_mean, std=self.train_std, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
+                test_set           = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=False, mean=self.train_mean, std=self.train_std, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
 
-        #     train_set, val_set    = torch.utils.data.random_split(train_set, [0.7, 0.3], generator=g)
+            train_set, val_set    = torch.utils.data.random_split(train_set, [0.7, 0.3], generator=g)
 
-        #     # train_set, ID_val_set    = torch.utils.data.random_split(train_set, [0.7, 0.3], generator=g)
-        #     # test_set, OOD_val_set    = torch.utils.data.random_split(test_set, [0.7, 0.3], generator=g)
-
-        # else:
-        #     # All Dataset
-        #     self.full_dataset                   = signal_dataset.SignalDataset('data_final', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=False, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
+        else:
+            # All Dataset
+            self.full_dataset                   = signal_dataset.SignalDataset('data_final', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=False, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
             
-        #     if normalise:
-        #         self.train_mean, self.train_std = utils.compute_dataset_mean_std(self.full_dataset, batch_size=self.batch_size)
-        #         self.full_dataset               = signal_dataset.SignalDataset('data_final', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=False, mean=self.train_mean, std=self.train_std, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
+            if normalise:
+                self.train_mean, self.train_std = utils.compute_dataset_mean_std(self.full_dataset, batch_size=self.batch_size)
+                self.full_dataset               = signal_dataset.SignalDataset('data_final', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=False, mean=self.train_mean, std=self.train_std, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
             
-        #     train_set, test_set, val_set        = torch.utils.data.random_split(self.full_dataset, [2520, 1500, 1080], generator=g)        
+            train_set, test_set, val_set        = torch.utils.data.random_split(self.full_dataset, [2520, 1500, 1080], generator=g)        
 
-        # print(f'Train Dataset Length: {len(train_set)}')
-        # print(f'Test Dataset Length:  {len(test_set)}')
-        # print(f'Val Dataset Length:   {len(val_set)}')
+        print(f'Train Dataset Length: {len(train_set)}')
+        print(f'Test Dataset Length:  {len(test_set)}')
+        print(f'Val Dataset Length:   {len(val_set)}')
 
-        # # Dataloader, Loss and Optimiser
-        # self.train_data                 = DataLoader(train_set, batch_size=self.batch_size, shuffle=shuffle, generator=g)
-        # self.test_data                  = DataLoader(test_set, batch_size=self.batch_size, shuffle=shuffle, generator=g)
-        # self.val_data                   = DataLoader(val_set, batch_size=self.batch_size, shuffle=shuffle, generator=g)
+        # Dataloader, Loss and Optimiser
+        self.train_data                 = DataLoader(train_set, batch_size=self.batch_size, shuffle=shuffle, generator=g)
+        self.test_data                  = DataLoader(test_set, batch_size=self.batch_size, shuffle=shuffle, generator=g)
+        self.val_data                   = DataLoader(val_set, batch_size=self.batch_size, shuffle=shuffle, generator=g)
 
         self.save_model_params()
 
@@ -132,6 +153,7 @@ class Manager():
             running_correct = 0
             running_total   = 0
 
+            # Freezing CAE decoder after certain number of epochs
             if self.reconstruct and epoch == self.freeze_epoch:
                 for p in model.deconv2.parameters(): p.requires_grad = False
                 for p in model.dbn2.parameters():   p.requires_grad = False
@@ -172,8 +194,6 @@ class Manager():
                     loss = loss_cls
 
                 # Accuracy Calculations
-                # print(mat_out.shape)
-                # print(tex_out.shape)
                 mat_preds = mat_out.argmax(dim=1)
                 tex_preds = tex_out.argmax(dim=1) 
                 running_correct += (mat_preds == mat_target).sum().item() + (tex_preds == tex_target).sum().item()
@@ -295,8 +315,6 @@ class Manager():
                 mat_target = mat_target.to(self.device).long()
                 tex_target = tex_target.to(self.device).long()
                 
-                # if self.reconstruct:
-                #     signal_out      = self.model(signal, reconstruct=True)
                 mat_out, tex_out    = self.model(signal)
                 mat_preds = mat_out.argmax(dim=1)
                 tex_preds = tex_out.argmax(dim=1)
@@ -348,13 +366,6 @@ class Manager():
         utils.plot_confusion_matrix(tex_cm, self.tex_classes, tex_cm_file)
         utils.plot_confusion_matrix(combined_cm, comb_classes, comb_file)
 
-        # utils.confusion_plotter_dual(
-        #     mat_cm, tex_cm,
-        #     mat_cm_file, tex_cm_file,
-        #     plotting=False,
-        #     normalize='true'
-        # )
-
         # Save reports
         report_path = f'{self.file_pth}/test_report.txt'
         with open(report_path, 'w', encoding='utf-8') as f:
@@ -365,8 +376,8 @@ class Manager():
             f.write("\n\n=== Dual Classification Report ===\n")
             f.write(combined_report)                                                            # type: ignore
 
-        # if self.reconstruct:
-        #     self.reconstruction_tst(test_data)
+        if self.reconstruct:
+            self.reconstruction_tst(test_data)
 
     # ------------------------------------------ Reconstruction -------------------------------------------
 
@@ -376,7 +387,6 @@ class Manager():
 
         with torch.no_grad():
             for i, batch in enumerate(test_data):
-        # batch = self.test_data.dataset[0]
                 signal, mat_target, tex_target = batch
                 signal = signal[0].unsqueeze(0).to(self.device).float()  # (1, C, L)
                 mat_target = mat_target[0].unsqueeze(0).to(self.device).long()
@@ -434,7 +444,6 @@ class Manager():
             'shuffle_batches'   : self.shuffle,
             'learning_rate'     : self.learning_rate,
             'weight_decay'      : self.weight_decay,
-            'test_train_split'  : self.distribution,
             'tex_weight'        : self.tex_weight,
             'mat_weight'        : self.mat_weight,
             'filtering'         : self.filtering,
@@ -453,7 +462,7 @@ class Manager():
         with open(f'{self.file_pth}/model_params.json', 'w') as json_file:
             json.dump(param_dict, json_file, indent=4)
 
-    # ------------------------------------- Training and Testing -------------------------------------
+    # ------------------------------------- Signal Augmentation -------------------------------------
 
     def augment_signal(self, x, sigma=0.01, scale_range=(0.95,1.05), max_shift=8):
         # x: (B, C, L)
@@ -468,159 +477,28 @@ class Manager():
 
 if __name__ == '__main__':
 
-    t2=['smallberry', 'rough']
-    m2=['ef10', 'ef50']
+    tex_classes=['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
+    mat_classes=['ds20', 'ds30', 'ef10', 'ef30', 'ef50']
 
-    t3=['citrus', 'rough', 'smallberry']
-    m3=['ef10', 'ef30', 'ef50']
+    model = model_CNN.Model()
+    # model = model_CAE.Model()
+    # model = model_LSTM.Model()
 
-    t4=['citrus', 'rough', 'smallberry', 'strawberry']
-    m4=['ds20', 'ef10', 'ef30', 'ef50']
-
-    t5=['citrus', 'rough', 'smallberry', 'smooth', 'strawberry'] 
-    m5=['ds20', 'ds30', 'ef10', 'ef30', 'ef50']
-
-    t6=['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
-    m6=['ds20', 'ds30', 'ef10', 'ef30', 'ef50']
-
-    mat_lst = [m2, m3, m4, m5, m6]
-    tex_lst = [t2, t3, t4, t5, t6]
-
-    # for i in range(len(tex_lst)):
-    #     model = model_lstm_cnn.Model()
-    #     m = mat_lst[i]
-    #     t = tex_lst[i]
-
-    #     manager = Manager(model, file_pth=f'experiments_static/LSTM/sequence/m{len(m)}_t{len(t)}', 
-    #                 num_epochs=75, batch_size=32, shuffle=True,
-    #                 tex_classes=t,
-    #                 mat_classes=m,
-    #                 multigrasp=None,
-    #                 tex_weight=1.0,
-    #                 mat_weight=1.5, 
-    #                 reconstruct_weight=0.2,
-    #                 early_stopping=5,
-    #                 reconstruct=False,
-    #                 filtering=False,
-    #                 cropping=True,
-    #                 normalise=True,
-    #                 augment=False, 
-    #                 data_partition=True)
+    manager = Manager(model, file_pth=f'EXPERIMENTS/CNN/run1', 
+                    num_epochs=20, batch_size=32, shuffle=True,
+                    tex_classes=tex_classes,
+                    mat_classes=mat_classes,
+                    multigrasp=None,
+                    tex_weight=1.0,
+                    mat_weight=1.5, 
+                    reconstruct_weight=0.2,
+                    early_stopping=None,
+                    reconstruct=False,
+                    filtering=False,
+                    cropping=True,
+                    normalise=True,
+                    augment=False, 
+                    data_partition=True)
     
-    #     manager.run_training(manager.train_data, manager.val_data) 
-    #     manager.run_testing(manager.test_data)
-
-    num_epochs=20
-    batch_size=32
-    shuffle=True
-    tex_classes=t6
-    mat_classes=m6
-    multigrasp=None
-    tex_weight=1.0
-    mat_weight=1.5,
-    reconstruct_weight=0.2
-    early_stopping=None
-    reconstruct=False
-    filtering=False
-    cropping=True
-    normalise=True
-    augment=False
-    data_partition=True
-
-    if data_partition:
-        train_set              = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=False, tex_classes=tex_classes, mat_classes=mat_classes)
-        test_set               = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=False, tex_classes=tex_classes, mat_classes=mat_classes)
-
-        if normalise:
-            train_mean, train_std = utils.compute_dataset_mean_std(train_set, batch_size=batch_size)
-            train_set           = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=False, mean=train_mean, std=train_std, tex_classes=tex_classes, mat_classes=mat_classes)
-            
-            # self.test_mean, self.test_std = utils.compute_dataset_mean_std(test_set, batch_size=self.batch_size)
-            test_set           = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=False, mean=train_mean, std=train_std, tex_classes=tex_classes, mat_classes=mat_classes)
-
-        train_set, val_set    = torch.utils.data.random_split(train_set, [0.7, 0.3], generator=g)
-
-        # train_set, ID_val_set    = torch.utils.data.random_split(train_set, [0.7, 0.3], generator=g)
-        # test_set, OOD_val_set    = torch.utils.data.random_split(test_set, [0.7, 0.3], generator=g)
-
-    else:
-        # All Dataset
-        full_dataset                   = signal_dataset.SignalDataset('data_final', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=False, augment=False, tex_classes=tex_classes, mat_classes=mat_classes)
-        
-        if normalise:
-            train_mean, train_std = utils.compute_dataset_mean_std(full_dataset, batch_size=batch_size)
-            full_dataset               = signal_dataset.SignalDataset('data_final', multigrasp=multigrasp, filtering=filtering, cropping=cropping, normalise=True, augment=False, mean=train_mean, std=train_std, tex_classes=tex_classes, mat_classes=mat_classes)
-        
-        train_set, test_set, val_set        = torch.utils.data.random_split(full_dataset, [2520, 1500, 1080], generator=g)        
-
-    print(f'Train Dataset Length: {len(train_set)}')
-    print(f'Test Dataset Length:  {len(test_set)}')
-    print(f'Val Dataset Length:   {len(val_set)}')
-
-    # Dataloader, Loss and Optimiser
-    train_data                 = DataLoader(train_set, batch_size=batch_size, shuffle=shuffle, generator=g)
-    test_data                  = DataLoader(test_set, batch_size=batch_size, shuffle=shuffle, generator=g)
-    val_data                   = DataLoader(val_set, batch_size=batch_size, shuffle=shuffle, generator=g)
-
-    for i in range(3):
-        model = model_CNN.Model(num_features=12)
-        manager = Manager(model, file_pth=f'FINAL_MISC/CNN_SENSOR_1/run{i+1}', 
-                        num_epochs=20, batch_size=32, shuffle=True,
-                        tex_classes=t6,
-                        mat_classes=m6,
-                        multigrasp=None,
-                        tex_weight=1.0,
-                        mat_weight=1.5, 
-                        reconstruct_weight=0.2,
-                        early_stopping=None,
-                        reconstruct=False,
-                        filtering=False,
-                        cropping=True,
-                        normalise=True,
-                        augment=False, 
-                        data_partition=False)
-        
-        manager.run_training(train_data, val_data)
-        manager.run_testing(test_data)
-
-    # for i in range(3):
-    #     model = model_1DCNN.Model()
-    #     manager = Manager(model, file_pth=f'final_experiment_same_run2/CNN/in_distr{i+1}', 
-    #                     num_epochs=20, batch_size=32, shuffle=True,
-    #                     tex_classes=t6,
-    #                     mat_classes=m6,
-    #                     multigrasp=None,
-    #                     tex_weight=1.0,
-    #                     mat_weight=1.5, 
-    #                     reconstruct_weight=0.2,
-    #                     early_stopping=None,
-    #                     reconstruct=False,
-    #                     filtering=False,
-    #                     cropping=True,
-    #                     normalise=True,
-    #                     augment=False, 
-    #                     data_partition=False)
-        
-    #     manager.run_training(train_data, val_data)
-    #     manager.run_testing(test_data)
-
-    # for i in range(3):
-    #     model = model_AE_same_struct.Model()
-    #     manager = Manager(model, file_pth=f'final_experiment_same_run2/CAE_fine_tune/in_distr{i+1}', 
-    #                     num_epochs=20, batch_size=32, shuffle=True,
-    #                     tex_classes=t6,
-    #                     mat_classes=m6,
-    #                     multigrasp=None,
-    #                     tex_weight=1.0,
-    #                     mat_weight=1.5, 
-    #                     reconstruct_weight=1.0,
-    #                     early_stopping=None,
-    #                     reconstruct=True,
-    #                     filtering=False,
-    #                     cropping=True,
-    #                     normalise=True,
-    #                     augment=False, 
-    #                     data_partition=False)
-        
-    #     manager.run_training(train_data, val_data)
-    #     manager.run_testing(test_data)
+    manager.run_training(manager.train_data, manager.val_data)
+    manager.run_testing(manager.test_data)

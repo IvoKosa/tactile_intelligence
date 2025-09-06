@@ -1,9 +1,10 @@
 import utils, torch
 from torch.utils.data import Dataset
-"""
-Signal Dataset Class
 
-"""
+# ******************************************* Dataset Class *******************************************
+# 
+# See manager class for details on parameters
+#
 
 class SignalDataset(Dataset):
     def __init__(self, root_dir, multigrasp, filtering, cropping, normalise, augment, dual_cls=True,
@@ -36,7 +37,7 @@ class SignalDataset(Dataset):
         return len(self.dict_list)
 
     def __getitem__(self, index):
-        sensor_0 = utils.data_loader(self.dict_list[index]['s0_file_pth'], cropping=self.cropping, filtering=self.filtering, augment=self.augment)
+        sensor_0 = utils.data_loader(self.dict_list[index]['s0_file_pth'], cropping=self.cropping, filtering=self.filtering)
         if self.s0_only:
             if 't_seconds' in sensor_0.columns:
                 sensor_0 = sensor_0.drop(columns='t_seconds')
@@ -44,7 +45,7 @@ class SignalDataset(Dataset):
                 sensor_0 = sensor_0.reset_index(drop=True)
             x = torch.from_numpy(sensor_0.to_numpy().T)
         else:
-            sensor_1 = utils.data_loader(self.dict_list[index]['s1_file_pth'], cropping=self.cropping, filtering=self.filtering, augment=self.augment)
+            sensor_1 = utils.data_loader(self.dict_list[index]['s1_file_pth'], cropping=self.cropping, filtering=self.filtering)
             x        = utils.dfs_to_tensor_nearest(sensor_0, sensor_1)
 
         # [Optional]: Normalisation 

@@ -1,40 +1,34 @@
-import os, re, torch, random, sys
-from torch.utils.data import DataLoader
+import os, re, torch
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from datetime import datetime, timedelta
+from pathlib import Path
+from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
 from matplotlib.ticker import FuncFormatter
-from pathlib import Path
-import matplotlib.pyplot as plt
 from scipy.signal import butter, filtfilt
-from typing import List, Dict
+
+# ****************************** Utils.py ******************************
+#
+# > Contains various helper functions for all model testing/ training 
+# > Additionally contains some plotting functions for loss curves/ confusion matrices
 
 # ------------------------------------------------------------------------ Loading Functions
 
 # Load Data from Single CSV path
-def data_loader(csv_path, cropping, filtering, calibrated=True, augment=True, euc_norm=False):
+def data_loader(csv_path, cropping, filtering, calibrated=True, euc_norm=False):
     df = pd.read_csv(csv_path) 
     df.set_index('timestamp', inplace=True)
     df = normalise_df_time(df)
-
-    # aug_rand = random.random()
-    # if augment and aug_rand <= 0.4:
-    #     df = augment_data(df)
 
     if filtering:
         df = butterworth_filter(df)
 
     if cropping:
-        df = new_crop(df, centre_sec=2.7, window_size=120) # Cropped to the sensor contact 
+        df = crop_signal(df, centre_sec=2.7, window_size=120) # Cropped to the sensor contact 
     else:
-        df = new_crop(df, centre_sec=2.7, window_size=420) # Cropped approx 50 datapoints off each end. Effectively full signal
-
-    # if cropping:
-    #     df = crop_df(df, center_pct=48, window_size=120) # Cropped to the sensor contact 
-    # else:
-    #     df = crop_df(df, center_pct=50, window_size=420) # Cropped approx 50 datapoints off each end. Effectively full signal
+        df = crop_signal(df, centre_sec=2.7, window_size=420) # Cropped approx 50 datapoints off each end. Effectively full signal
     
     if calibrated:
         df = df.drop(columns=df.columns[0 : 12])
@@ -58,38 +52,15 @@ def normalise_df_time(df):
     df.index.name = 't_seconds'
     return df
 
-# Crop data around centre percentage and with given window size on either size
-def crop_df(df, center_pct, window_size):
-    n = len(df)
-    pct = np.clip(center_pct, 0, 100)
-    center_idx = int(n * pct / 100)
-    start = max(center_idx - window_size, 0)
-    end   = min(center_idx + window_size, n)
-    return df.iloc[start:end]
-
-def new_crop(df, centre_sec, window_size):
+# Crop signal to specified window around centre point specified in seconds
+def crop_signal(df, centre_sec, window_size):
     idx_vals = df.index.to_numpy()
     pos = int(np.argmin(np.abs(idx_vals - centre_sec)))
     start = max(pos - window_size, 0)
     end   = min(pos + window_size, len(df))
     return df.iloc[start:end]
 
-def augment_data(x):
-    # aug_rand = random.random()
-    # if aug_rand <= 0.4:
-    #     x = time_shift(x)
-    x = add_gaussian_noise(x)
-    return x
-
-def time_shift(df, max_shift=2):
-    shift = np.random.randint(-max_shift, max_shift + 1)
-    shifted = df.shift(periods=shift, axis=1)
-    return shifted.fillna(0)
-
-def add_gaussian_noise(df, std=0.01):
-    noise = np.random.randn(*df.shape) * std
-    return df + noise
-
+# Used for testing XYZ concatenation methods
 def collapse_xyz_to_norm(df):
     if df.shape[1] % 3 != 0:
         raise ValueError("Number of columns must be divisible by 3 (x,y,z groups).")
@@ -105,6 +76,8 @@ def collapse_xyz_to_norm(df):
 
 # ------------------------------------------------------------------------ New Dataset Management 
 
+# Central file collection system for pytorch dataset takes in root directory and desired texture/ material classes
+# Generates a list of dictionaries, each one containing all file path and class information 
 def collect_file_info(root_dir, tex_classes, mat_classes, singlegrasp_limit=20):
     tex_classes = sorted(tex_classes)
     mat_classes = sorted(mat_classes)
@@ -171,9 +144,11 @@ def collect_file_info(root_dir, tex_classes, mat_classes, singlegrasp_limit=20):
     # print(counter)
     return(dict_list)
 
+# File collection helper functions
 def file_contains_str(file_str, search_str):
     return re.search(search_str, file_str, re.IGNORECASE) is not None
 
+# File collection helper functions
 def file_cls_finder(file_str, cls_list):
     for cls in cls_list:
         if cls in file_str:
@@ -182,8 +157,8 @@ def file_cls_finder(file_str, cls_list):
             return cls, position
         
     return (None, None)
-    # raise ValueError("None of the candidate strings were found in the path.")
 
+# File collection helper functions
 def get_file_index(directory_path: str, filename: str) -> int:
     if not os.path.isdir(directory_path):
         raise FileNotFoundError(f"Directory not found: {directory_path!r}")
@@ -202,9 +177,10 @@ def get_file_index(directory_path: str, filename: str) -> int:
         raise ValueError(f"File {filename!r} not found in directory (after filtering).")
     
 # ------------------------------------------------------------------------ Dataset Normalisation 
-    
-def compute_dataset_mean_std(dataset, batch_size=20, num_workers=4):
-    """Utility to scan the entire dataset and compute per-channel mean & std."""
+
+# Central function for computing dataset mean and standard deviation
+# Takes in a pytorch dataset and returns dataset mean and std
+def compute_dataset_mean_std(dataset, batch_size=32, num_workers=4):
     loader = DataLoader(dataset, batch_size=batch_size,
                         shuffle=False, num_workers=num_workers,
                         pin_memory=True)
@@ -228,13 +204,14 @@ def compute_dataset_mean_std(dataset, batch_size=20, num_workers=4):
     std  = torch.sqrt(var) # type: ignore
     return mean, std
 
+# Normalisation helper function
 def zscore_denormalize(x, mean, std):
     C = x.shape[1]
     mean = mean.view(1, C, 1).to(x.device)
     std  = std.view(1, C, 1).to(x.device)
     return x * std + mean
 
-# ------------------------------------------------------------------------ Dataset Normalisation 
+# ------------------------------------------------------------------------ Dataset management helper functions 
 
 def dfs_to_tensor_nearest(df1: pd.DataFrame,
                           df2: pd.DataFrame):
@@ -247,13 +224,7 @@ def dfs_to_tensor_nearest(df1: pd.DataFrame,
         on='t',
         direction='nearest'
     ).dropna()
-    # merged = merged.drop(columns='t')
-    # reshaped = merged.to_numpy().reshape(len(merged), -1, 3)  # shape: (n_samples, n_sensors, 3)
-    # norms = np.linalg.norm(reshaped, axis=2)
-    # print(norms)
-    # return torch.from_numpy(norms.T)
     return torch.from_numpy(merged.drop(columns='t').T.values)
-
 
 def get_class(material, texture):
 
@@ -348,44 +319,6 @@ def sensor_plotter(signal1_df,
 
     match plot_mode:
         case 'taxel':
-            # axes = _make_subplots(4)
-            # count = 0
-            # for ax, sensor in zip(axes, taxel_range):                                           # type: ignore
-            #     count += 1
-            #     for dim in data_dim:
-            #         if calibrated:
-            #             col = f'{dim}{sensor}_calib'
-            #         else:
-            #             col = f'{dim}{sensor}'
-            #         ax.plot(signal1_df.index, signal1_df[col], alpha=raw_alpha, lw=1, label=f'{col[:-6]}')
-            #         if has_filt:
-            #             ax.plot(signal2_df.index, signal2_df[col], lw=2, label=f'{col[:-6]} Reconstructed')           # type: ignore
-            #     ax.set_ylim(y_min, y_max)
-            #     ax.set_ylabel('Cilia Deformation')
-            #     ax.set_title(f'Taxel {sensor}')
-            #     # vline_pts = [1.25, 2.2, 3.1, 4.05]
-            #     # ax.vlines(vline_pts, -500, 500, color=['r', 'r', 'r', 'r'], linestyles='dashed')
-            #     # if count == 4:
-            #     #     ymin, ymax = ax.get_ylim()
-            #     #     pts_lst = [0.5, 1.7, 2.67, 3.55, 4.5]
-            #     #     for i in range(len(pts_lst)):
-            #     #         ax.text(
-            #     #             pts_lst[i],                # x position
-            #     #             ax.get_ylim()[0],     # ymin - 0.15*(ymax - ymin),    # y position (bottom of y-axis)
-            #     #             f'Gripper Pos {i+1}',          # text
-            #     #             color='r',
-            #     #             ha='center',         # horizontal alignment
-            #     #             va='top',            # vertical alignment (just above x-axis)
-            #     #             backgroundcolor='w'  # optional: white background
-            #     #         )
-            #     ax.legend(loc='upper right', fontsize='small')
-            # axes[-1].set_xlabel('Time (s)')                                                     # type: ignore
-            # plt.tight_layout()
-            # if save_pth is not None:
-            #     plt.savefig(save_pth)
-            # else:
-            #     plt.show()
-                # --- changed helper: return 2x2 axes, flattened ---
             def _make_subplots_2x2():
                 fig, axes = plt.subplots(nrows=2, ncols=2, sharex=True, figsize=(20, 8))
                 return fig, axes.ravel()
@@ -411,7 +344,6 @@ def sensor_plotter(signal1_df,
 
             # Label x-axis only on the bottom row (axes[2] and axes[3])
             axes[2].set_xlabel('Time steps')
-            # axes[2].set_xlim([315, 555])
             axes[2].xaxis.set_major_formatter(FuncFormatter(shift_xaxis))
             axes[3].set_xlabel('Time steps')
 
@@ -518,17 +450,6 @@ def loss_plots(save_pth,
             gap_acc=None,
             plotting=False,
             stopping_epoch=None):
-    """
-    Plot training/validation loss and accuracy, plus generalisation gaps.
-
-    Args:
-        train_loss (list of float): per‑epoch training loss
-        val_loss   (list of float): per‑epoch validation loss
-        train_acc  (list of float): per‑epoch training accuracy
-        val_acc    (list of float): per‑epoch validation accuracy
-        gap_loss   (list of float): per‑epoch loss gap (val_loss - train_loss)
-        gap_acc    (list of float): per‑epoch accuracy gap (train_acc - val_acc)
-    """
 
     # ——— Loss curves ———
     plt.figure()
@@ -629,56 +550,8 @@ def plot_joint_accuracy_table(accuracy_table, mat_classes, tex_classes, save_pat
     ax.set_title("Joint Accuracy Table: Material (X) vs Texture (Y)")
 
     plt.tight_layout()
-    # if plotting:
-    #     plt.show()
+
     plt.savefig(save_path)
-    
-def split_dataset(
-    dataset,
-    ratios,
-    split,
-    seed: int = 42
-    ):
-
-    if len(ratios) != 3 or abs(sum(ratios) - 1.0) > 1e-6:
-        raise ValueError("`ratios` must be [test, train, val] and sum to 1.")
-    if seed is not None:
-        random.seed(seed)
-
-    key = f"tex_cls_int"
-
-    groups: Dict[int, List[Dict]] = {}
-    for item in dataset:
-        label = item.get(key)
-        if label is None:
-            raise KeyError(f"Item missing expected key {key!r}: {item}")
-        groups.setdefault(label, []).append(item)
-
-    test_set, train_set, val_set = [], [], []
-
-    for items in groups.values():
-        random.shuffle(items)
-        n = len(items)
-        n_test  = int(n * ratios[0])
-        n_train = int(n * ratios[1])
-        n_val   = n - n_test - n_train
-
-        test_set.extend( items[:n_test] )
-        train_set.extend(items[n_test:n_test + n_train])
-        val_set.extend(  items[n_test + n_train:] )
-
-    random.shuffle(test_set)
-    random.shuffle(train_set)
-    random.shuffle(val_set)
-
-    if split == 'test':
-        return test_set
-    elif split == 'val':
-        return val_set
-    elif split == 'train':
-        return train_set
-    else:
-        raise ValueError('Split must be either: test/train/val')
 
 if __name__ == '__main__':
     filepath    = r'data_final/multigrasp_train/ef30_multigrasp/smallberry_ef30/smallberry_ef30m/sensor1_data_20250730_155016.csv'
