@@ -1,6 +1,7 @@
 # General Imports
-import signal_dataset, model_1DCNN, Misc.lstm_model as lstm_model, utils, json, os, shutil
+import signal_dataset, model_CNN, Misc.lstm_model as lstm_model, utils, json, os, shutil, random, Misc.model_1DCNN_single_class as model_1DCNN_single_class
 import matplotlib.pyplot as plt
+import numpy as np
 
 # Pytorch Imports
 import torch
@@ -11,7 +12,7 @@ from torch.utils.data import DataLoader, random_split
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 class Manager():
-    def __init__(self, file_pth='experiments/misc', num_epochs=20, batch_size=15, shuffle=True, lr=0.001, weight_decay=0.01,
+    def __init__(self, model, file_pth='experiments/misc', num_epochs=75, batch_size=32, shuffle=True, lr=0.001, weight_decay=0.01,
                  distribution=[0.7, 0.2, 0.1], filtering=False, cropping=False, normalise=False, augment=False):
 
         # Hyperparams
@@ -29,8 +30,9 @@ class Manager():
 
         # Dataset and Model
         self.device                     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model                      = lstm_model.Tactile_CNN().to(self.device)
-        self.dual_cls                   = self.model.dual_cls
+        # self.model                      = model_1DCNN_single_class.Model().to(self.device)
+        self.model                      = model.to(self.device)
+        self.dual_cls                   = False
 
         # Old Dataset Functions
         # self.full_dataset               = signal_dataset.SignalDataset('data', filtering=filtering, cropping=cropping, normalise=normalise, augment=augment)
@@ -38,18 +40,35 @@ class Manager():
         # train_set, test_set, val_set    = random_split(self.full_dataset, [0.7, 0.2, 0.1], generator=gen_seed)
 
         # New Dataset Functions
-        train_set                       = signal_dataset.SignalDataset('data', self.dual_cls, 'train', distribution , filtering=filtering, cropping=cropping, normalise=normalise, augment=augment)
-        test_set                        = signal_dataset.SignalDataset('data', self.dual_cls, 'test', distribution , filtering=filtering, cropping=cropping, normalise=normalise, augment=False)
-        val_set                         = signal_dataset.SignalDataset('data', self.dual_cls, 'val', distribution , filtering=filtering, cropping=cropping, normalise=normalise, augment=False)
+        # train_set                       = signal_dataset.SignalDataset('data', self.dual_cls, 'train', distribution , filtering=filtering, cropping=cropping, normalise=normalise, augment=augment)
+        # test_set                        = signal_dataset.SignalDataset('data', self.dual_cls, 'test', distribution , filtering=filtering, cropping=cropping, normalise=normalise, augment=False)
+        # val_set                         = signal_dataset.SignalDataset('data', self.dual_cls, 'val', distribution , filtering=filtering, cropping=cropping, normalise=normalise, augment=False)
         
-        print(f'Train Dataset Length: {len(train_set)}')
-        print(f'Test Dataset Length:  {len(test_set)}')
-        print(f'Val Dataset Length:   {len(val_set)}')
+        # print(f'Train Dataset Length: {len(train_set)}')
+        # print(f'Test Dataset Length:  {len(test_set)}')
+        # print(f'Val Dataset Length:   {len(val_set)}')
 
-        # Dataloader, Loss and Optimiser
-        self.train_data                 = DataLoader(train_set, batch_size=self.batch_size, shuffle=shuffle)
-        self.test_data                  = DataLoader(test_set, batch_size=self.batch_size, shuffle=shuffle)
-        self.val_data                   = DataLoader(val_set, batch_size=self.batch_size, shuffle=shuffle)
+        self.tex_classes=['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
+        self.mat_classes=['ds20', 'ds30', 'ef10', 'ef30', 'ef50']
+
+        # train_set              = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=None, filtering=filtering, cropping=cropping, normalise=False, augment=False, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
+        # test_set               = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=None, filtering=filtering, cropping=cropping, normalise=False, augment=False, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
+
+        # if normalise:
+        #     self.train_mean, self.train_std = utils.compute_dataset_mean_std(train_set, batch_size=self.batch_size)
+        #     train_set           = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=None, filtering=filtering, cropping=cropping, normalise=True, augment=False, mean=self.train_mean, std=self.train_std, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
+            
+        #     # self.test_mean, self.test_std = utils.compute_dataset_mean_std(test_set, batch_size=self.batch_size)
+        #     test_set           = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=None, filtering=filtering, cropping=cropping, normalise=True, augment=False, mean=self.train_mean, std=self.train_std, tex_classes=self.tex_classes, mat_classes=self.mat_classes)
+
+        # g = torch.Generator().manual_seed(935248)
+
+        # train_set, val_set    = torch.utils.data.random_split(train_set, [0.7, 0.3], generator=g)
+
+        # # Dataloader, Loss and Optimiser
+        # self.train_data                 = DataLoader(train_set, batch_size=self.batch_size, shuffle=shuffle)
+        # self.test_data                  = DataLoader(test_set, batch_size=self.batch_size, shuffle=shuffle)
+        # self.val_data                   = DataLoader(val_set, batch_size=self.batch_size, shuffle=shuffle)
         self.optim                      = optim.Adam(self.model.parameters(), lr=lr, weight_decay=weight_decay)
 
         if self.dual_cls:
@@ -60,10 +79,11 @@ class Manager():
 
         self.save_model_params()
 
-    def run_training(self, plotting=False):
+    def run_training(self, train_data, val_data, plotting=False):
 
         min_val_loss         = float('inf')
         epoch_no_improvement = 0
+        stop_epoch           = 0
 
         train_loss_plot_data       = []
         val_loss_plot_data         = []
@@ -79,9 +99,10 @@ class Manager():
             running_correct = 0
             running_total   = 0
 
-            for i, batch in enumerate(self.train_data):
+            for i, batch in enumerate(train_data):
                 if self.dual_cls:
                     signal, mat_target, tex_target = batch
+
                     signal              = signal.to(self.device).float()
                     mat_target          = mat_target.to(self.device).long()
                     tex_target          = tex_target.to(self.device).long()
@@ -98,6 +119,11 @@ class Manager():
 
                 else:
                     signal, target      = batch
+
+                    aug_rand = random.random()
+                    if self.augment and aug_rand < 0.5:
+                        signal = self.augment_signal(signal)
+
                     signal              = signal.to(self.device).float()
                     target              = target.to(self.device).long()
 
@@ -115,11 +141,11 @@ class Manager():
 
                 if i % 20 == 0:
                     print(f"Epoch [{epoch+1}/{self.num_epochs}], "
-                        f"Step [{i}/{len(self.train_data)}], "
+                        f"Step [{i}/{len(train_data)}], "
                         f"Loss: {loss.item():.4f}")
 
             # compute epoch training metrics
-            avg_train_loss = running_loss / len(self.train_data)
+            avg_train_loss = running_loss / len(train_data)
             train_acc      = running_correct / running_total
 
             train_loss_plot_data.append(avg_train_loss)
@@ -135,7 +161,7 @@ class Manager():
             val_total        = 0
 
             with torch.no_grad():
-                for i, batch in enumerate(self.val_data):
+                for i, batch in enumerate(val_data):
 
                     if self.dual_cls:
                         signal, mat_target, tex_target = batch
@@ -166,7 +192,7 @@ class Manager():
                         val_correct += (preds == target).sum().item()
                         val_total   += target.size(0)
 
-            avg_val_loss = running_val_loss / len(self.val_data)
+            avg_val_loss = running_val_loss / len(val_data)
             val_acc      = val_correct / val_total
 
             val_loss_plot_data.append(avg_val_loss)
@@ -190,11 +216,12 @@ class Manager():
                 min_val_loss = avg_val_loss
                 epoch_no_improvement = 0
                 torch.save(self.model.state_dict(), f'{self.file_pth}/model_weights.pth')
+                stop_epoch = epoch
                 print(f'Model saved under {self.file_pth}/model_weights.pth')
             else:
                 epoch_no_improvement += 1
                 print(f'  → No improvement for {epoch_no_improvement} epoch(s).')
-                if epoch_no_improvement > 2:
+                if epoch_no_improvement >= 20:
                     print('Early stopping activated.')
                     break
 
@@ -207,10 +234,11 @@ class Manager():
             val_acc_plot_data,
             gap_loss_plot_data,
             gap_acc_plot_data,
-            plotting=plotting
+            plotting=plotting,
+            stopping_epoch=stop_epoch
         )
 
-    def run_testing(self, plotting=False):
+    def run_testing(self, test_data, plotting=False):
         self.load_model()
         self.model.eval()
 
@@ -222,7 +250,7 @@ class Manager():
             all_targets, all_preds = [], []
 
         with torch.no_grad():
-            for batch in self.test_data:
+            for batch in test_data:
                 if self.dual_cls:
                     signal, mat_target, tex_target = batch
                     signal     = signal.to(self.device).float()
@@ -272,12 +300,12 @@ class Manager():
             # Plot both with confusion_plotter_dual
             mat_cm_file = f"{self.file_pth}/confusion_matrix_material.png"
             tex_cm_file = f"{self.file_pth}/confusion_matrix_texture.png"
-            utils.confusion_plotter_dual(
-                mat_cm, tex_cm,
-                mat_cm_file, tex_cm_file,
-                plotting=plotting,
-                normalize='true'
-            )
+            # utils.confusion_plotter_dual(
+            #     mat_cm, tex_cm,
+            #     mat_cm_file, tex_cm_file,
+            #     plotting=plotting,
+            #     normalize='true'
+            # )
 
             # Save reports
             report_path = f'{self.file_pth}/test_report.txt'
@@ -300,43 +328,43 @@ class Manager():
             print("\nClassification Report:\n", report)
 
             cm_filename = f'{self.file_pth}/confusion_matrix.png'
-            utils.confusion_plotter(cm, cm_filename, plotting)
+            # utils.confusion_plotter(cm, cm_filename, plotting)
 
             with open(f'{self.file_pth}/test_reports.txt', 'w', encoding="utf-8") as file:
                 file.write(report)                                                                  # type: ignore
 
-    def inspect_model(self):
-        self.load_model()
-        self.model.eval()
-        dataset = self.test_data.dataset
+    # def inspect_model(self):
+    #     self.load_model()
+    #     self.model.eval()
+    #     dataset = test_data.dataset
 
-        with torch.no_grad():
-            signal, target = dataset[0]
-            x      = signal.unsqueeze(0).to(self.device).float()
-            target = target.unsqueeze(0).to(self.device).long()
+    #     with torch.no_grad():
+    #         signal, target = dataset[0]
+    #         x      = signal.unsqueeze(0).to(self.device).float()
+    #         target = target.unsqueeze(0).to(self.device).long()
 
-        x.requires_grad_()
+    #     x.requires_grad_()
 
-        # saliency = Saliency(self.model)
-        ig = IntegratedGradients(self.model)
+    #     # saliency = Saliency(self.model)
+    #     ig = IntegratedGradients(self.model)
         
-        # attr = saliency.attribute(x, target=target)
-        attr = ig.attribute(x, baselines=torch.zeros_like(x),
-                       target=target,
-                       n_steps=50)
+    #     # attr = saliency.attribute(x, target=target)
+    #     attr = ig.attribute(x, baselines=torch.zeros_like(x),
+    #                    target=target,
+    #                    n_steps=50)
 
-        attr_np = attr.detach().cpu().squeeze().numpy()   # shape: (C, T)
-        time = range(attr_np.shape[1])
+    #     attr_np = attr.detach().cpu().squeeze().numpy()   # shape: (C, T)
+    #     time = range(attr_np.shape[1])
 
-        # fig, axes = plt.subplots(nrows=attr_np.shape[0], figsize=(10, 2*attr_np.shape[0]))
-        fig, axes = plt.subplots(nrows=3, figsize=(10, 2*attr_np.shape[0]))
-        for c, ax in enumerate(axes):
-            ax.plot(time, x.detach().cpu().squeeze()[c].numpy(), label=f'Channel {c}')
-            ax_t = ax.twinx()
-            ax_t.plot(time, attr_np[c], color='C1', alpha=0.5, label='Saliency')
-            ax.set_title(f'Channel {c}')
-        plt.tight_layout()
-        plt.show()
+    #     # fig, axes = plt.subplots(nrows=attr_np.shape[0], figsize=(10, 2*attr_np.shape[0]))
+    #     fig, axes = plt.subplots(nrows=3, figsize=(10, 2*attr_np.shape[0]))
+    #     for c, ax in enumerate(axes):
+    #         ax.plot(time, x.detach().cpu().squeeze()[c].numpy(), label=f'Channel {c}')
+    #         ax_t = ax.twinx()
+    #         ax_t.plot(time, attr_np[c], color='C1', alpha=0.5, label='Saliency')
+    #         ax.set_title(f'Channel {c}')
+    #     plt.tight_layout()
+    #     plt.show()
 
     def load_model(self):
         ckpt = torch.load(f'{self.file_pth}/model_weights.pth', map_location=self.device, weights_only=True)
@@ -368,22 +396,69 @@ class Manager():
         with open(f'{self.file_pth}/model_params.json', 'w') as json_file:
             json.dump(param_dict, json_file, indent=4)
 
-        source_path         = 'lstm_model.py'
-        destination_path    = f'{self.file_pth}/model.py'
-        shutil.copy2(source_path, destination_path)
+        # source_path         = 'lstm_model.py'
+        # destination_path    = f'{self.file_pth}/model.py'
+        # shutil.copy2(source_path, destination_path)
+
+    def augment_signal(self, x, sigma=0.01, scale_range=(0.95,1.05), max_shift=8):
+        # x: (B, C, L)
+        if not self.model.training: return x
+        B, C, L = x.shape
+        noise = sigma * torch.randn_like(x)
+        scale = torch.empty(B, 1, 1, device=x.device).uniform_(*scale_range)
+        x = x * scale + noise
+        shifts = torch.randint(-max_shift, max_shift+1, (B,), device=x.device)
+        x = torch.stack([torch.roll(x[i], int(shifts[i].item()), dims=-1) for i in range(B)], dim=0)
+        return x
 
 if __name__ == '__main__':
 
-    manager = Manager(file_pth='experiments/hyperparams/augment_filtering', 
-                      num_epochs=15, batch_size=15,
-                      distribution=[0.7, 0.2, 0.1],
-                      filtering=False,
-                      cropping=False,
-                      normalise=False,
-                      augment=False)
+    seed = 935248
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    g = torch.Generator().manual_seed(seed)
+
+    num_epochs=75
+    batch_size=32
+    shuffle=True
+    lr=0.001
+    weight_decay=0.01
+    distribution=[0.7, 0.2, 0.1]
+    filtering=False
+    cropping=True
+    augment=False
+    tex_classes=['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
+    mat_classes=['ds20', 'ds30', 'ef10', 'ef30', 'ef50']
+
+    train_set              = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=None, filtering=filtering, cropping=cropping, normalise=False, augment=False, tex_classes=tex_classes, mat_classes=mat_classes)
+    test_set               = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=None, filtering=filtering, cropping=cropping, normalise=False, augment=False, tex_classes=tex_classes, mat_classes=mat_classes)
+
+    train_mean, train_std = utils.compute_dataset_mean_std(train_set, batch_size=batch_size)
+    train_set           = signal_dataset.SignalDataset('data_final/multigrasp_train', multigrasp=None, filtering=filtering, cropping=cropping, normalise=True, augment=False, mean=train_mean, std=train_std, tex_classes=tex_classes, mat_classes=mat_classes)
     
-    manager.run_training()
-    manager.run_testing()
+    # self.test_mean, self.test_std = utils.compute_dataset_mean_std(test_set, batch_size=self.batch_size)
+    test_set           = signal_dataset.SignalDataset('data_final/multigrasp_test', multigrasp=None, filtering=filtering, cropping=cropping, normalise=True, augment=False, mean=train_mean, std=train_std, tex_classes=tex_classes, mat_classes=mat_classes)
+
+    train_set, val_set    = torch.utils.data.random_split(train_set, [0.7, 0.3], generator=g)
+
+    # Dataloader, Loss and Optimiser
+    train_data                 = DataLoader(train_set, batch_size=batch_size, shuffle=shuffle, generator=g)
+    test_data                  = DataLoader(test_set, batch_size=batch_size, shuffle=shuffle, generator=g)
+    val_data                   = DataLoader(val_set, batch_size=batch_size, shuffle=shuffle, generator=g)
+
+    for i in range(3):
+        model = model_1DCNN_single_class.Model()
+        manager = Manager(model, file_pth=f'FINAL_MISC/single_loss/run{i+4}', 
+                        num_epochs=20, batch_size=32,
+                        distribution=[0.7, 0.2, 0.1],
+                        filtering=False,
+                        cropping=True,
+                        normalise=True,
+                        augment=False)
+        
+        manager.run_training(train_data, val_data)
+        manager.run_testing(test_data)
 
     # texture_list    = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
     # material_list   = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50', 'rigid']

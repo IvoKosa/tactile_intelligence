@@ -1,5 +1,5 @@
 # General Imports
-import signal_dataset, model_1DCNN, model_AE, Misc.better_lstm as better_lstm, Misc.resnet_CNN as resnet_CNN, utils, json, os, shutil, itertools
+import signal_dataset, model_CNN, Misc.model_AE as model_AE, Misc.better_lstm as better_lstm, Misc.resnet_CNN as resnet_CNN, utils, json, os, shutil, itertools
 import matplotlib.pyplot as plt
 
 # Pytorch Imports
@@ -41,7 +41,7 @@ class Manager():
         # Dataset and Model
         self.device                     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # self.model                      = better_lstm.DualHeadLSTM().to(self.device)
-        self.model                      = model_1DCNN.Tactile_CNN(num_features=8).to(self.device)
+        self.model                      = model_CNN.Tactile_CNN(num_features=8).to(self.device)
         # self.model                      = resnet_CNN.ResNet1DClassifier().to(self.device)
         self.dual_cls                   = True # Override if needed: model.dual_
         if self.dual_cls:
