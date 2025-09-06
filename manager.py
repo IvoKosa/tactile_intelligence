@@ -42,7 +42,7 @@ g = torch.Generator().manual_seed(seed)
 #       > mat_weight            [float]     : weight factor multiplied with material loss       (default 1.0)
 #       > reconstruct_weight    [float]     : weight factor multiplied with reconstruction loss (default 1.0)
 #       > early_stopping        [int/ None] : specifies after how many epochs without val loss improvement before training stops early
-#       > reconstruct           [bool]      : specifies if the reconstruction training program should run
+#       > reconstruct           [bool]      : specifies if the reconstruction training program should run (Must be used only with CAE model)
 #       > freeze_epoch          [int]       : number op epochs after which CAE decoder will be frozen
 #       > tex_classes           [str-list]  : list of all texture classes the model will train and test with
 #       > mat_classes           [str-list]  : list of all material classes the model will train and test with
@@ -397,7 +397,7 @@ class Manager():
                 break
 
         mat_probs = torch.argmax(F.softmax(mat_out, dim=1))          # type: ignore
-        tex_probs = torch.argmax(F.softmax(mat_out, dim=1))          # type: ignore
+        tex_probs = torch.argmax(F.softmax(tex_out, dim=1))          # type: ignore
 
         print(f'Mat Target: {mat_target} | Mat Output: {mat_probs}') # type: ignore
         print(f'Tex Target: {tex_target} | Tex Output: {tex_probs}') # type: ignore
@@ -485,7 +485,7 @@ if __name__ == '__main__':
     # model = model_LSTM.Model()
 
     manager = Manager(model, file_pth=f'EXPERIMENTS/CNN/run1', 
-                    num_epochs=1, batch_size=32, shuffle=True,
+                    num_epochs=2, batch_size=32, shuffle=True,
                     tex_classes=tex_classes,
                     mat_classes=mat_classes,
                     multigrasp=None,
