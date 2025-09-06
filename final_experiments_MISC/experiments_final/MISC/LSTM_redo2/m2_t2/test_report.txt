@@ -1,0 +1,33 @@
+=== Material Classification Report ===
+              precision    recall  f1-score   support
+
+           0     0.9346    1.0000    0.9662       100
+           1     1.0000    0.9300    0.9637       100
+
+    accuracy                         0.9650       200
+   macro avg     0.9673    0.9650    0.9650       200
+weighted avg     0.9673    0.9650    0.9650       200
+
+
+=== Texture Classification Report ===
+              precision    recall  f1-score   support
+
+           0     0.9091    1.0000    0.9524       100
+           1     1.0000    0.9000    0.9474       100
+
+    accuracy                         0.9500       200
+   macro avg     0.9545    0.9500    0.9499       200
+weighted avg     0.9545    0.9500    0.9499       200
+
+
+=== Dual Classification Report ===
+              precision    recall  f1-score   support
+
+         0_0     0.8197    1.0000    0.9009        50
+         0_1     0.8696    0.8000    0.8333        50
+         1_0     1.0000    0.9800    0.9899        50
+         1_1     1.0000    0.8800    0.9362        50
+
+    accuracy                         0.9150       200
+   macro avg     0.9223    0.9150    0.9151       200
+weighted avg     0.9223    0.9150    0.9151       200

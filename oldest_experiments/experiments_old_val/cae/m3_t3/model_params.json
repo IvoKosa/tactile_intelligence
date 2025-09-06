@@ -1,0 +1,31 @@
+{
+    "num_epochs": 75,
+    "batch_size": 20,
+    "early_stopping": 5,
+    "shuffle_batches": true,
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "test_train_split": [
+        0.7,
+        0.2,
+        0.1
+    ],
+    "tex_weight": 1.0,
+    "mat_weight": 1.5,
+    "filtering": true,
+    "cropping": true,
+    "normalise": true,
+    "augment": true,
+    "file_pth": "experiments_final/cae/m3_t3",
+    "Day2-3_partition": true,
+    "tex_classes": [
+        "citrus",
+        "rough",
+        "smallberry"
+    ],
+    "mat_classes": [
+        "ef10",
+        "ef30",
+        "ef50"
+    ]
+}
