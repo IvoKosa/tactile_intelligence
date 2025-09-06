@@ -13,7 +13,7 @@ The project also introduces a curated dataset of tactile signals collected from 
 bio-inspired magnetic sensor, providing a challenging benchmark for multi-task tactile learning. 
 
 ## Installation
-Outline any dependencies or setup instructions. For example:  
+Install dependecies, ensure that pytorch is properly installed 
 ```bash
 git clone <https://github.com/IvoKosa/tactile_intelligence/tree/main>
 cd <tactile_intelligence>
@@ -21,7 +21,13 @@ pip install -r requirements.txt
 ```
 
 ## Training and Testing
-manager.py      -- Run the training and testing for the CNN, CAE and LSTM models
+manager.py      -- Runs the training and testing for the CNN, CAE and LSTM models
                 -- All function parameters can be found within the file comments
+                -- Simply change any desired parameters in the file and run
 
 signal_SVM.py   -- Runs the SVM models
+                -- Parameters specified in file
+                -- Can be run as is
+
+## Previous experiments
+All data used in the report along with model weights can be found in the FINAL_... folders
