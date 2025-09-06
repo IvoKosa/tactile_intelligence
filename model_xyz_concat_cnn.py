@@ -28,7 +28,7 @@ class xyz_encoder(nn.Module):
         y = y.squeeze(-1)
         return y
 
-class XYZGrouper1D_Multi(nn.Module):
+class xyz_encoder_multi(nn.Module):
     """
     Uses multiple independent xyz_encoders, one per region.
     Input:  (B, C, L), C = 3 * n_regions, channels ordered x1,y1,z1,x2,y2,z2,...
@@ -55,17 +55,18 @@ class XYZGrouper1D_Multi(nn.Module):
         return torch.stack(outs, dim=1)
 
 class Model(nn.Module):
-    def __init__(self, num_features=24, mat_classes=5, tex_classes=6):
+    def __init__(self, num_features=24, mat_classes=5, tex_classes=6, multi_concat=True):
         super(Model, self).__init__()
 
         assert num_features % 3 == 0, 'Num Features needs to be in units of 3'
         self.num_taxels = num_features // 3
 
-        # Single shared-weight encoder:
-        # self.xyz        = xyz_encoder()
-
-        # Multiple seperate encoders:
-        self.xyz        = XYZGrouper1D_Multi(self.num_taxels)
+        if multi_concat:
+            # Multiple seperate encoders:
+            self.xyz    = xyz_encoder_multi(self.num_taxels)
+        else:
+            # Single shared-weight encoder:
+            self.xyz    = xyz_encoder()
 
         # Encoder
         self.conv0      = nn.Conv1d(self.num_taxels, 32, kernel_size=5, padding=2) 

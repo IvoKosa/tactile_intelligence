@@ -1,5 +1,9 @@
 import utils, torch
 from torch.utils.data import Dataset
+"""
+Signal Dataset Class
+
+"""
 
 class SignalDataset(Dataset):
     def __init__(self, root_dir, multigrasp, filtering, cropping, normalise, augment, dual_cls=True,

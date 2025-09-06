@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from datetime import datetime, timedelta
+from matplotlib.ticker import MultipleLocator
 from matplotlib.ticker import FuncFormatter
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -13,7 +14,7 @@ from typing import List, Dict
 # ------------------------------------------------------------------------ Loading Functions
 
 # Load Data from Single CSV path
-def data_loader(csv_path, cropping, filtering, calibrated=True, augment=True, euc_norm=True):
+def data_loader(csv_path, cropping, filtering, calibrated=True, augment=True, euc_norm=False):
     df = pd.read_csv(csv_path) 
     df.set_index('timestamp', inplace=True)
     df = normalise_df_time(df)
@@ -515,7 +516,8 @@ def loss_plots(save_pth,
             val_acc=None,
             gap_loss=None,
             gap_acc=None,
-            plotting=False):
+            plotting=False,
+            stopping_epoch=None):
     """
     Plot training/validation loss and accuracy, plus generalisation gaps.
 
@@ -537,8 +539,13 @@ def loss_plots(save_pth,
     plt.title('Training vs Validation Loss')
     plt.legend()
     plt.grid(True)
+    if stopping_epoch is not None:
+        ymin, ymax = plt.gca().get_ylim()
+        plt.vlines(stopping_epoch, ymin=ymin, ymax=ymax, color='red', linestyle='--')
+        plt.text(stopping_epoch, plt.ylim()[0] - 1, f"{int(stopping_epoch)}", ha="center", va="top", color="red", bbox=dict(facecolor='white', edgecolor='none', pad=5.0))
     if plotting:
         plt.show()
+    plt.gca().xaxis.set_major_locator(MultipleLocator(1))
     plt.savefig(f'{save_pth}/loss_plot.png')
 
     # ——— Accuracy curves ———
@@ -551,8 +558,13 @@ def loss_plots(save_pth,
         plt.title('Training vs Validation Accuracy')
         plt.legend()
         plt.grid(True)
+        if stopping_epoch is not None:
+            ymin, ymax = plt.gca().get_ylim()
+            plt.vlines(stopping_epoch, ymin=ymin, ymax=ymax, color='red', linestyle='--')
+            plt.text(stopping_epoch, plt.ylim()[0] - 1, f"{int(stopping_epoch)}", ha="center", va="top", color="red", bbox=dict(facecolor='white', edgecolor='none', pad=5.0))
         if plotting:
             plt.show()
+        plt.gca().xaxis.set_major_locator(MultipleLocator(1))
         plt.savefig(f'{save_pth}/accuracy_plot.png')
 
     # ——— Generalisation gap ———
@@ -564,8 +576,13 @@ def loss_plots(save_pth,
         plt.title('Generalisation Gap Over Time')
         plt.legend()
         plt.grid(True)
+        if stopping_epoch is not None:
+            ymin, ymax = plt.gca().get_ylim()
+            plt.vlines(stopping_epoch, ymin=ymin, ymax=ymax, color='red', linestyle='--')
+            plt.text(stopping_epoch, plt.ylim()[0] - 1, f"{int(stopping_epoch)}", ha="center", va="top", color="red", bbox=dict(facecolor='white', edgecolor='none', pad=5.0))
         if plotting:
             plt.show()
+        plt.gca().xaxis.set_major_locator(MultipleLocator(1))
         plt.savefig(f'{save_pth}/generalisation_plot.png')
 
 def compute_pairwise_accuracy(mat_true, mat_pred, tex_true, tex_pred, mat_classes, tex_classes):
