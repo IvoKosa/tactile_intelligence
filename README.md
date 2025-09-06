@@ -33,4 +33,4 @@ signal_SVM.py   -- Runs the SVM models
 All data used in the report along with model weights can be found in the FINAL_... folders
 
 ## Dataset
-The full dataset is stored under data_final which itself is split into two folders: multigrasp_train (collection 1) and multigrasp_test (collection 2)
+The full dataset is stored under data_final which itself is split into two folders: multigrasp_train (collection 1) and multigrasp_test (collection 2 & single-grasp)
