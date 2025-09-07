@@ -9,21 +9,42 @@ from sklearn.metrics import (
     confusion_matrix, classification_report
 )
 
-# ---------- helpers ----------
-def _to_numpy(x):
+# Helper Functions
+def torch_to_numpy(x):
     if torch is not None and isinstance(x, torch.Tensor):
         return x.detach().cpu().numpy()
     return np.asarray(x)
 
-def _stats_features(signal_np: np.ndarray) -> np.ndarray:
-    """
-    Per-channel stats: mean, std, min, max, median, p25, p75  -> 7 features/channel.
-    Handles (C, L), (L, C), or (L,) signals.
-    """
+# Helper Functions
+def to_single_label(y):
+    y_np = torch_to_numpy(y)
+    y_np = np.squeeze(y_np)
+    if y_np.ndim == 1 and y_np.size > 1:
+        if np.isclose(y_np.sum(), 1.0, atol=1e-3) or np.all((y_np == 0) | (y_np == 1)):
+            return int(np.argmax(y_np))
+    if y_np.shape == ():
+        return y_np.item()
+    return y_np
+
+# Approach 1: Flattens signal by appending
+def flatten_signal(signal_np: np.ndarray) -> np.ndarray:
     if signal_np.ndim == 1:
-        x = signal_np[None, :]  # (1, L)
+        return signal_np.ravel()
+    if signal_np.shape[0] == 24: 
+        signal_np = signal_np.T 
+    elif signal_np.shape[1] == 24:
+        pass 
     else:
-        x = signal_np if signal_np.shape[0] <= 64 else signal_np.T  # (C, L) heuristic
+        raise ValueError(f"Unexpected signal shape {signal_np.shape}, expected 24 channels")
+
+    return signal_np.reshape(-1)
+
+# Approach 2: Reduces signal to per-channel features
+def stats_features(signal_np: np.ndarray) -> np.ndarray:
+    if signal_np.ndim == 1:
+        x = signal_np[None, :]
+    else:
+        x = signal_np if signal_np.shape[0] <= 64 else signal_np.T
     feats = []
     for ch in range(x.shape[0]):
         v = x[ch]
@@ -33,52 +54,20 @@ def _stats_features(signal_np: np.ndarray) -> np.ndarray:
         ])
     return np.array(feats, dtype=np.float64)
 
-def _flatten_signal(signal_np: np.ndarray) -> np.ndarray:
-    """
-    Flatten a (C, L) or (L, C) signal into a vector:
-    [t1c1, t1c2, ... t1cC, t2c1, t2c2, ... t2cC, ..., tLc1, ... tLcC].
-    """
-    # ensure shape (L, C)
-    if signal_np.ndim == 1:
-        return signal_np.ravel()
-    if signal_np.shape[0] == 24:  # assume (C, L)
-        signal_np = signal_np.T    # -> (L, C)
-    elif signal_np.shape[1] == 24:
-        pass  # already (L, C)
-    else:
-        raise ValueError(f"Unexpected signal shape {signal_np.shape}, expected 24 channels")
-
-    return signal_np.reshape(-1)  # flatten row-wise
-
-def _coerce_single_label(y):
-    """Convert mat/tex targets to scalar IDs if one-hot or scalar."""
-    y_np = _to_numpy(y)
-    y_np = np.squeeze(y_np)
-    if y_np.ndim == 1 and y_np.size > 1:
-        if np.isclose(y_np.sum(), 1.0, atol=1e-3) or np.all((y_np == 0) | (y_np == 1)):
-            return int(np.argmax(y_np))
-    if y_np.shape == ():
-        return y_np.item()
-    return y_np
-
+# Dual class to single class target flattening
 def dataset_to_xy_combined(dataset, use_features):
-    """
-    Build X and combined labels from (signal, mat_target, tex_target).
-    Flatten each signal to (L*24,) vector.
-    Combined label = "mat=<m>|tex=<t>"
-    """
     X, labels = [], []
     for i in range(len(dataset)):
         signal, mat_target, tex_target = dataset[i]
 
         if use_features:
-            feats = _stats_features(_to_numpy(signal))
+            feats = stats_features(torch_to_numpy(signal))
         else:
-            feats = _flatten_signal(_to_numpy(signal))
+            feats = flatten_signal(torch_to_numpy(signal))
         X.append(feats)
 
-        m = _coerce_single_label(mat_target)
-        t = _coerce_single_label(tex_target)
+        m = to_single_label(mat_target)
+        t = to_single_label(tex_target)
         labels.append(f"mat={m}|tex={t}")
 
     X = np.vstack(X)
@@ -86,7 +75,7 @@ def dataset_to_xy_combined(dataset, use_features):
     y = le.fit_transform(labels)
     return X, y, list(le.classes_)
 
-# ---------- main routine ----------
+# Main running function
 def run_svm_combined(train_set, test_set, use_features=False, C=1.0, gamma="scale"):
     X_tr, y_tr, class_names = dataset_to_xy_combined(train_set, use_features)
     X_te, y_te, _ = dataset_to_xy_combined(test_set, use_features)
@@ -133,8 +122,8 @@ if __name__ == "__main__":
     torch.cuda.manual_seed_all(seed)
     g = torch.Generator().manual_seed(seed)
 
-    use_features = False
-    out_of_distribution = False
+    use_features = True
+    out_of_distribution = True
 
     mat_classes = ['ds20', 'ds30', 'ef10', 'ef30', 'ef50']
     tex_classes = ['bigberry', 'citrus', 'rough', 'smallberry', 'smooth', 'strawberry']
