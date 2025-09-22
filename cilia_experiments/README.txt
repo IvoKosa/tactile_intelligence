@@ -1,6 +1,6 @@
 Cilia Additional Experiments:
 
-This folder contains additional experiments run by modifying various aspects of the sensor itself. All experiments are recorded in the same default centren position. For reference when viewing experiment footage. Sensor 0 is on the left and sensor 1 is on the right. For each sensor when viewed from the front: Taxel 1 is located on the bottom left; Taxel 2 is located on the bottom right; Taxel 3 is on the top left and Taxel 4 is on the top right
+This folder contains additional experiments run by modifying various aspects of the sensor itself. All experiments are recorded in the same default centre position. For reference when viewing experiment footage Sensor 0 is on the left and sensor 1 is on the right. For each sensor when viewed from the front: Taxel 1 is located on the bottom left; Taxel 2 is located on the bottom right; Taxel 3 is on the top left and Taxel 4 is on the top right
 
 Experiment 1:  s1_with_cilia
 For this exeriment the top two cilia (taxels 3 and 4), along with the magnetic backing were completely removed from sensor 1. The overall aim was to then compare this with only the cilia backing (see: s1_no_cilia)
