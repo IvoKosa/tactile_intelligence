@@ -42,3 +42,7 @@ The data gathered from the grasps is stored in the sensor0 and sensor1 csv files
 ```timestamp,x1,y1,z1,x2,y2,z2,x3,y3,z3,x4,y4,z4,x1_calib,y1_calib,z1_calib,x2_calib,y2_calib,z2_calib,x3_calib,y3_calib,z3_calib,x4_calib,y4_calib,z4_calib```
 
 Each row represents the readings of each axis of the sensor for each Taxel grouped into x_n, y_n, z_n, where n shows the Taxel number for 4 total Taxels per sensor. Both the raw values and calibrated values (ending in _calib) are collected, where the sensor readings are re-calibrated to start at 0 before each grasp. Only the calibrated values were used for the results gained in this project. The gripper positions show the gripper appetrure (angle) at a selection of timestamps and were not used ito gather any of the results shown.
+
+## Videos:
+
+Videos of the data collection process can be viewed here: https://drive.google.com/drive/folders/1O33RIPMjevWZI-CN7F8SJx75xm_70W13?usp=sharing
